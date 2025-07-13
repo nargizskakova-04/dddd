@@ -1,0 +1,46 @@
+{
+    "app": {
+      "port": 8080
+    },
+    "repository": {
+      "db_host": "localhost",
+      "db_port": 5432,
+      "db_name": "market",
+      "db_username": "postgres",
+      "db_password": "postgres",
+      "db_ssl_mode": "disable",
+      "max_conn": 10,
+      "max_idle_conn": 10
+    },
+    "cache": {
+      "redis_host": "localhost",
+      "redis_port": 6379,
+      "redis_password": "",
+      "redis_db": 0,
+      "pool_size": 10,
+      "min_idle_conns": 5
+    },
+    "exchanges": {
+      "live_exchanges": [
+        {
+          "name": "exchange1",
+          "host": "localhost",
+          "port": 40101
+        },
+        {
+          "name": "exchange2",
+          "host": "localhost",
+          "port": 40102
+        },
+        {
+          "name": "exchange3",
+          "host": "localhost",
+          "port": 40103
+        }
+      ],
+      "test_mode": {
+        "update_interval_ms": 1000,
+        "symbols": ["BTCUSDT", "DOGEUSDT", "TONUSDT", "SOLUSDT", "ETHUSDT"]
+      }
+    }
+  }
