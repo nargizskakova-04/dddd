@@ -30,20 +30,20 @@ func Start() error {
 
 	if *helpFlag {
 		flag.Usage()
-		return fmt.Errorf("D")
+		os.Exit(0) // Exit cleanly when help is requested
 	}
 
 	slog.Info("Loading configuration...")
 	config, err := config.GetConfig(cfgPath)
 	if err != nil {
-		slog.Error("failed to get config: %w", err)
+		slog.Error("failed to get config", "error", err)
 		return fmt.Errorf("failed to get config: %w", err)
 	}
 
 	if *port > 0 {
 		config.App.Port = *port
 	}
-	slog.Info("Configuration loaded: port=%d\n", config.App.Port)
+	slog.Info("Configuration loaded", "port", config.App.Port)
 
 	slog.Info("Creating application instance...")
 	app := server.NewApp(config)

@@ -120,7 +120,7 @@ func (app *App) Run() {
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("Server error", "error", err)
-		panic(err)
+		return
 	}
 }
 
