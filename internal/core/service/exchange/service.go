@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"crypto/internal/adapters/exchanges"
-	"crypto/internal/core/domain"
-	"crypto/internal/core/port"
+	"cryptomarket/internal/adapters/exchanges"
+	"cryptomarket/internal/core/domain"
+	"cryptomarket/internal/core/port"
 )
 
 // ExchangeService implements the port.ExchangeService interface

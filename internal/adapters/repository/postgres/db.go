@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"crypto/internal/config"
+	"cryptomarket/internal/config"
 )
 
 func NewDbConnInstance(cfg *config.Repository) (*sql.DB, error) {

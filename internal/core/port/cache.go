@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"crypto/internal/core/domain"
+	"cryptomarket/internal/core/domain"
 )
 
 type Cache interface {

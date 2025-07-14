@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"crypto/internal/core/domain"
-	"crypto/internal/core/port"
+	"cryptomarket/internal/core/domain"
+	"cryptomarket/internal/core/port"
 )
 
 // LiveExchangeAdapter connects to real exchange programs via TCP

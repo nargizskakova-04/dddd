@@ -5,7 +5,7 @@ package exchanges
 import (
 	"fmt"
 
-	"crypto/internal/core/port"
+	"cryptomarket/internal/core/port"
 )
 
 // Exchange types constants

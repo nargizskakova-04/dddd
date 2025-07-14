@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"crypto/internal/app"
+	"cryptomarket/internal/app"
 )
 
 func main() {

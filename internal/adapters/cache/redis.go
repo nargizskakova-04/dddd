@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"crypto/internal/core/domain"
-	"crypto/internal/core/port"
+	"cryptomarket/internal/core/domain"
+	"cryptomarket/internal/core/port"
 
 	"github.com/redis/go-redis/v9"
 )

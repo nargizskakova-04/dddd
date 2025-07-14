@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"crypto/internal/core/port"
+	"cryptomarket/internal/core/port"
 )
 
 type PriceHandler struct {

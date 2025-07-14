@@ -7,8 +7,8 @@ import (
 	"math/rand"
 	"time"
 
-	"crypto/internal/core/domain"
-	"crypto/internal/core/port"
+	"cryptomarket/internal/core/domain"
+	"cryptomarket/internal/core/port"
 )
 
 // TestExchangeAdapter generates synthetic market data using the Generator pattern

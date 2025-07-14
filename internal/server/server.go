@@ -8,14 +8,14 @@ import (
 	"net/http"
 	"time"
 
-	"crypto/internal/adapters/cache"
-	v1 "crypto/internal/adapters/handler/http/v1"
-	"crypto/internal/adapters/repository/postgres"
-	"crypto/internal/config"
-	"crypto/internal/core/domain"
-	"crypto/internal/core/port"
-	"crypto/internal/core/service/exchange"
-	"crypto/internal/core/service/prices"
+	"cryptomarket/internal/adapters/cache"
+	v1 "cryptomarket/internal/adapters/handler/http/v1"
+	"cryptomarket/internal/adapters/repository/postgres"
+	"cryptomarket/internal/config"
+	"cryptomarket/internal/core/domain"
+	"cryptomarket/internal/core/port"
+	"cryptomarket/internal/core/service/exchange"
+	"cryptomarket/internal/core/service/prices"
 
 	"github.com/redis/go-redis/v9"
 

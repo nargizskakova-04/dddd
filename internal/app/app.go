@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 
-	"crypto/internal/config"
-	"crypto/internal/server"
+	"cryptomarket/internal/config"
+	"cryptomarket/internal/server"
 )
 
 const cfgPath = "./config/config.json"
