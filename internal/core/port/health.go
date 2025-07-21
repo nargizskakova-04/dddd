@@ -1,5 +1,9 @@
+// internal/core/port/health.go
 package port
 
-type HealthRepository interface{}
+import "context"
 
-type HealthService interface{}
+type HealthService interface {
+	// Get system health status
+	GetSystemHealth(ctx context.Context) map[string]interface{}
+}

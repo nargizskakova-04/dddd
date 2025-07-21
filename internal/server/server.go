@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,10 +24,11 @@ import (
 )
 
 type App struct {
-	cfg         *config.Config
-	router      *http.ServeMux
-	db          *sql.DB
-	redisClient *redis.Client
+	cfg          *config.Config
+	router       *http.ServeMux
+	db           *sql.DB
+	redisClient  *redis.Client
+	cacheAdapter port.Cache
 
 	// Services
 	exchangeService port.ExchangeService
@@ -76,32 +78,35 @@ func (app *App) Initialize() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var cacheAdapter *cache.RedisAdapter
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		slog.Warn("Redis connection failed, continuing without cache", "error", err)
 		app.redisClient = nil
-		cacheAdapter = nil
+		app.cacheAdapter = nil
 	} else {
 		app.redisClient = redisClient
-		cacheAdapter = cache.NewRedisAdapter(redisClient).(*cache.RedisAdapter)
+		app.cacheAdapter = cache.NewRedisAdapter(redisClient)
 		slog.Info("Redis connected successfully")
 	}
 
 	// Initialize services following hexagonal architecture
 
-	// 1. Create Exchange Service (handles data collection)
-	app.exchangeService = exchange.NewExchangeService()
+	// 1. Create Exchange Service (handles data collection) - now with cache
+	app.exchangeService = exchange.NewExchangeService(app.cfg, app.cacheAdapter)
 
 	// 2. Create Price Service (business logic layer)
-	app.priceService = prices.NewPriceService(cacheAdapter, app.db)
+	app.priceService = prices.NewPriceService(app.cacheAdapter, app.db)
 
 	// 3. Create Handlers (adapters layer)
 	priceHandler := v1.NewPriceHandler(app.priceService)
-	healthHandler := v1.NewHealthHandler(nil) // TODO: implement health service
-	modeHandler := v1.NewModeHandler(nil)     // TODO: implement mode service
+	healthHandler := v1.NewHealthHandler(app.createHealthService())
+	modeHandler := v1.NewModeHandler(app.createModeService())
 
 	// 4. Set up routes
 	v1.SetMarketRoutes(app.router, priceHandler, healthHandler, modeHandler)
+
+	// Add debug routes
+	app.router.HandleFunc("GET /debug/cache/clear", app.handleCacheClear)
+	app.router.HandleFunc("GET /debug/stats", app.handleDebugStats)
 
 	// 5. Start background data processing
 	go app.startMarketDataProcessor()
@@ -121,6 +126,58 @@ func (app *App) Run() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("Server error", "error", err)
 		return
+	}
+}
+
+// Debug handlers
+func (app *App) handleCacheClear(w http.ResponseWriter, r *http.Request) {
+	if app.cacheAdapter == nil {
+		http.Error(w, "Cache not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := app.cacheAdapter.CleanupOldData(ctx, 0); err != nil {
+		http.Error(w, "Failed to clear cache: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"message": "Cache cleared successfully"}`))
+}
+
+func (app *App) handleDebugStats(w http.ResponseWriter, r *http.Request) {
+	stats := make(map[string]interface{})
+
+	// Exchange service stats
+	if app.exchangeService != nil {
+		stats["exchange_service"] = app.exchangeService.GetStats()
+	}
+
+	// Current mode
+	if app.exchangeService != nil {
+		stats["current_mode"] = app.exchangeService.GetCurrentMode()
+	}
+
+	// Cache status
+	if app.redisClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if err := app.redisClient.Ping(ctx).Err(); err != nil {
+			stats["cache_status"] = "unhealthy: " + err.Error()
+		} else {
+			stats["cache_status"] = "healthy"
+		}
+	} else {
+		stats["cache_status"] = "unavailable"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		http.Error(w, "Failed to encode stats", http.StatusInternalServerError)
 	}
 }
 
@@ -147,7 +204,7 @@ func (app *App) startMarketDataProcessor() {
 	go app.processMarketData(dataStream)
 
 	// Start cleanup routine for Redis
-	if app.redisClient != nil {
+	if app.cacheAdapter != nil {
 		go app.startCleanupRoutine()
 	}
 
@@ -157,32 +214,45 @@ func (app *App) startMarketDataProcessor() {
 // processMarketData handles incoming market data and stores it in cache
 func (app *App) processMarketData(dataStream <-chan domain.MarketData) {
 	slog.Info("Starting market data processing goroutine...")
+	processedCount := 0
 
 	for {
 		select {
 		case data, ok := <-dataStream:
 			if !ok {
-				slog.Info("Market data stream closed")
+				slog.Info("Market data stream closed", "processed", processedCount)
 				return
 			}
 
+			processedCount++
+
+			// Log sample data for debugging
+			if processedCount%100 == 0 {
+				slog.Info("Processing market data",
+					"count", processedCount,
+					"symbol", data.Symbol,
+					"exchange", data.Exchange,
+					"price", data.Price)
+			}
+
 			// Store in Redis cache if available
-			if app.redisClient != nil {
-				cacheAdapter := cache.NewRedisAdapter(app.redisClient).(*cache.RedisAdapter)
+			if app.cacheAdapter != nil {
 				key := fmt.Sprintf("%s:%s", data.Symbol, data.Exchange)
 
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := cacheAdapter.SetPrice(ctx, key, data); err != nil {
-					slog.Error("Failed to store price in cache", "error", err, "symbol", data.Symbol, "exchange", data.Exchange)
+				if err := app.cacheAdapter.SetPrice(ctx, key, data); err != nil {
+					slog.Error("Failed to store price in cache",
+						"error", err,
+						"symbol", data.Symbol,
+						"exchange", data.Exchange)
 				}
 				cancel()
 			}
 
 			// TODO: Implement batching and PostgreSQL storage
-			// This should batch data and store aggregated statistics every minute
 
 		case <-app.ctx.Done():
-			slog.Info("Market data processing stopped")
+			slog.Info("Market data processing stopped", "processed", processedCount)
 			return
 		}
 	}
@@ -193,15 +263,13 @@ func (app *App) startCleanupRoutine() {
 	ticker := time.NewTicker(30 * time.Second) // Clean up every 30 seconds
 	defer ticker.Stop()
 
-	cacheAdapter := cache.NewRedisAdapter(app.redisClient).(*cache.RedisAdapter)
-
 	for {
 		select {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
 			// Clean up data older than 2 minutes
-			if err := cacheAdapter.CleanupOldData(ctx, 2*time.Minute); err != nil {
+			if err := app.cacheAdapter.CleanupOldData(ctx, 2*time.Minute); err != nil {
 				slog.Error("Failed to cleanup old data", "error", err)
 			}
 
@@ -211,6 +279,22 @@ func (app *App) startCleanupRoutine() {
 			slog.Info("Cleanup routine stopped")
 			return
 		}
+	}
+}
+
+// createModeService creates a simple mode service
+func (app *App) createModeService() port.ModeService {
+	return &SimpleModeService{
+		exchangeService: app.exchangeService,
+	}
+}
+
+// createHealthService creates a simple health service
+func (app *App) createHealthService() port.HealthService {
+	return &SimpleHealthService{
+		exchangeService: app.exchangeService,
+		redisClient:     app.redisClient,
+		db:              app.db,
 	}
 }
 
@@ -244,4 +328,74 @@ func (app *App) Shutdown() error {
 
 	slog.Info("Application shutdown complete")
 	return nil
+}
+
+// SimpleModeService implements basic mode switching
+type SimpleModeService struct {
+	exchangeService port.ExchangeService
+}
+
+func (s *SimpleModeService) SwitchToTestMode(ctx context.Context) error {
+	return s.exchangeService.SwitchToTestMode(ctx)
+}
+
+func (s *SimpleModeService) SwitchToLiveMode(ctx context.Context) error {
+	return s.exchangeService.SwitchToLiveMode(ctx)
+}
+
+func (s *SimpleModeService) GetCurrentMode() string {
+	return s.exchangeService.GetCurrentMode()
+}
+
+// SimpleHealthService implements basic health checking
+type SimpleHealthService struct {
+	exchangeService port.ExchangeService
+	redisClient     *redis.Client
+	db              *sql.DB
+}
+
+func (s *SimpleHealthService) GetSystemHealth(ctx context.Context) map[string]interface{} {
+	health := make(map[string]interface{})
+
+	// Exchange service health
+	if s.exchangeService != nil {
+		stats := s.exchangeService.GetStats()
+		health["exchange_service"] = stats
+	} else {
+		health["exchange_service"] = "unavailable"
+	}
+
+	// Redis health
+	if s.redisClient != nil {
+		if err := s.redisClient.Ping(ctx).Err(); err != nil {
+			health["redis"] = map[string]interface{}{
+				"status": "unhealthy",
+				"error":  err.Error(),
+			}
+		} else {
+			health["redis"] = map[string]interface{}{
+				"status": "healthy",
+			}
+		}
+	} else {
+		health["redis"] = "unavailable"
+	}
+
+	// Database health
+	if s.db != nil {
+		if err := s.db.PingContext(ctx); err != nil {
+			health["database"] = map[string]interface{}{
+				"status": "unhealthy",
+				"error":  err.Error(),
+			}
+		} else {
+			health["database"] = map[string]interface{}{
+				"status": "healthy",
+			}
+		}
+	} else {
+		health["database"] = "unavailable"
+	}
+
+	return health
 }

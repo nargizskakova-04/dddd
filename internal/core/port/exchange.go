@@ -38,4 +38,13 @@ type ExchangeService interface {
 
 	// Get aggregated data channel
 	GetDataStream() <-chan domain.MarketData
+
+	// Get service statistics (добавлено)
+	GetStats() map[string]interface{}
+
+	// Get active adapters (добавлено)
+	GetActiveAdapters() []ExchangeAdapter
+
+	// Check if service is running (добавлено)
+	IsRunning() bool
 }

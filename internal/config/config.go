@@ -47,7 +47,7 @@ func GetConfig(path string) (*Config, error) {
 		cfg.Repository.DBName = name
 	}
 
-	// Redis environment variables (ДОБАВЛЕНО)
+	// Redis environment variables
 	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" {
 		cfg.Cache.RedisHost = redisHost
 	}
@@ -104,6 +104,34 @@ func GetConfig(path string) (*Config, error) {
 		}
 	}
 
+	// Test exchanges environment variables
+	if len(cfg.Exchanges.TestExchanges) >= 3 {
+		if testExchange1Host := os.Getenv("TEST_EXCHANGE1_HOST"); testExchange1Host != "" {
+			cfg.Exchanges.TestExchanges[0].Host = testExchange1Host
+		}
+		if testExchange1Port := os.Getenv("TEST_EXCHANGE1_PORT"); testExchange1Port != "" {
+			if p, err := strconv.Atoi(testExchange1Port); err == nil {
+				cfg.Exchanges.TestExchanges[0].Port = p
+			}
+		}
+		if testExchange2Host := os.Getenv("TEST_EXCHANGE2_HOST"); testExchange2Host != "" {
+			cfg.Exchanges.TestExchanges[1].Host = testExchange2Host
+		}
+		if testExchange2Port := os.Getenv("TEST_EXCHANGE2_PORT"); testExchange2Port != "" {
+			if p, err := strconv.Atoi(testExchange2Port); err == nil {
+				cfg.Exchanges.TestExchanges[1].Port = p
+			}
+		}
+		if testExchange3Host := os.Getenv("TEST_EXCHANGE3_HOST"); testExchange3Host != "" {
+			cfg.Exchanges.TestExchanges[2].Host = testExchange3Host
+		}
+		if testExchange3Port := os.Getenv("TEST_EXCHANGE3_PORT"); testExchange3Port != "" {
+			if p, err := strconv.Atoi(testExchange3Port); err == nil {
+				cfg.Exchanges.TestExchanges[2].Port = p
+			}
+		}
+	}
+
 	// Test mode environment variables
 	if updateInterval := os.Getenv("TEST_UPDATE_INTERVAL_MS"); updateInterval != "" {
 		if interval, err := strconv.Atoi(updateInterval); err == nil {
@@ -150,6 +178,7 @@ type Cache struct {
 
 type Exchanges struct {
 	LiveExchanges []ExchangeConfig `json:"live_exchanges"`
+	TestExchanges []ExchangeConfig `json:"test_exchanges"` // Добавлено
 	TestMode      TestModeConfig   `json:"test_mode"`
 }
 
