@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cryptomarket/internal/core/domain"
@@ -25,6 +26,12 @@ type LiveExchangeAdapter struct {
 	stopChan  chan struct{}
 	isRunning bool
 	isHealthy bool
+	mu        sync.RWMutex
+
+	// Connection tracking
+	connectionAttempts int
+	lastConnectTime    time.Time
+	messagesReceived   int
 }
 
 func NewLiveExchangeAdapter(host string, port int, name string) port.ExchangeAdapter {
@@ -32,20 +39,41 @@ func NewLiveExchangeAdapter(host string, port int, name string) port.ExchangeAda
 		host:      host,
 		port:      port,
 		name:      name,
-		dataChan:  make(chan domain.MarketData, 100),
-		stopChan:  make(chan struct{}),
 		isHealthy: false,
 	}
 }
 
 func (l *LiveExchangeAdapter) Start(ctx context.Context) (<-chan domain.MarketData, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if l.isRunning {
+		slog.Warn("Adapter already running", "name", l.name)
 		return l.dataChan, nil
 	}
 
+	slog.Info("=== Starting LiveExchangeAdapter ===",
+		"name", l.name,
+		"host", l.host,
+		"port", l.port)
+
+	// Reset state
+	l.connectionAttempts = 0
+	l.messagesReceived = 0
+	l.isHealthy = false
+
+	// Create fresh channels
+	l.dataChan = make(chan domain.MarketData, 500)
+	l.stopChan = make(chan struct{})
+
 	// Connect to exchange
 	if err := l.connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect to exchange %s: %w", l.name, err)
+		slog.Error("Failed to connect during start",
+			"name", l.name,
+			"host", l.host,
+			"port", l.port,
+			"error", err)
+		return nil, fmt.Errorf("failed to connect to exchange %s:%d: %w", l.host, l.port, err)
 	}
 
 	l.isRunning = true
@@ -57,30 +85,51 @@ func (l *LiveExchangeAdapter) Start(ctx context.Context) (<-chan domain.MarketDa
 	// Start reconnection handler
 	go l.handleReconnection(ctx)
 
-	slog.Info("Live exchange adapter started", "exchange", l.name, "port", l.port)
+	slog.Info("LiveExchangeAdapter started successfully",
+		"name", l.name,
+		"host", l.host,
+		"port", l.port)
 	return l.dataChan, nil
 }
 
 func (l *LiveExchangeAdapter) Stop() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if !l.isRunning {
 		return nil
 	}
 
+	slog.Info("=== Stopping LiveExchangeAdapter ===",
+		"name", l.name,
+		"messages_received", l.messagesReceived)
+
 	l.isRunning = false
 	l.isHealthy = false
 
-	// Close stop channel
-	close(l.stopChan)
+	// Close stop channel if not already closed
+	select {
+	case <-l.stopChan:
+		// Already closed
+	default:
+		close(l.stopChan)
+	}
 
 	// Close connection
 	if l.conn != nil {
 		l.conn.Close()
+		slog.Info("Closed connection", "name", l.name)
 	}
 
-	// Close data channel
-	close(l.dataChan)
+	// Close data channel safely
+	if l.dataChan != nil {
+		close(l.dataChan)
+		l.dataChan = nil
+	}
 
-	slog.Info("Live exchange adapter stopped", "exchange", l.name)
+	slog.Info("LiveExchangeAdapter stopped",
+		"name", l.name,
+		"total_messages_received", l.messagesReceived)
 	return nil
 }
 
@@ -89,41 +138,83 @@ func (l *LiveExchangeAdapter) Name() string {
 }
 
 func (l *LiveExchangeAdapter) IsHealthy() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.isHealthy
 }
 
 func (l *LiveExchangeAdapter) connect() error {
+	l.connectionAttempts++
+	l.lastConnectTime = time.Now()
+
 	address := fmt.Sprintf("%s:%d", l.host, l.port)
+	slog.Info("Attempting connection",
+		"name", l.name,
+		"address", address,
+		"attempt", l.connectionAttempts)
+
+	// First check if port is reachable
 	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
+		slog.Error("Connection failed",
+			"name", l.name,
+			"address", address,
+			"attempt", l.connectionAttempts,
+			"error", err)
+
+		// Check if it's a connection refused error (port not open)
+		if strings.Contains(err.Error(), "connection refused") {
+			slog.Error("Connection refused - target service not running?",
+				"name", l.name,
+				"address", address)
+		}
+
 		return fmt.Errorf("failed to connect to %s: %w", address, err)
 	}
 
 	l.conn = conn
+	slog.Info("Connection established successfully",
+		"name", l.name,
+		"address", address,
+		"attempt", l.connectionAttempts,
+		"local_addr", conn.LocalAddr(),
+		"remote_addr", conn.RemoteAddr())
+
 	return nil
 }
 
 func (l *LiveExchangeAdapter) readData(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("Panic in readData", "exchange", l.name, "panic", r)
+			slog.Error("Panic in readData", "name", l.name, "panic", r)
 		}
+		slog.Info("readData goroutine ended", "name", l.name, "messages_received", l.messagesReceived)
 	}()
 
 	scanner := bufio.NewScanner(l.conn)
+	lastLogTime := time.Now()
 
-	for l.isRunning {
+	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("readData context cancelled", "name", l.name)
 			return
 		case <-l.stopChan:
+			slog.Info("readData stop signal received", "name", l.name)
 			return
 		default:
+			// Set read deadline to avoid blocking forever
+			l.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
 			if !scanner.Scan() {
 				if err := scanner.Err(); err != nil {
-					slog.Error("Scanner error", "exchange", l.name, "error", err)
+					slog.Error("Scanner error", "name", l.name, "error", err)
+				} else {
+					slog.Info("Scanner finished (connection closed by remote)", "name", l.name)
 				}
+				l.mu.Lock()
 				l.isHealthy = false
+				l.mu.Unlock()
 				return
 			}
 
@@ -132,23 +223,61 @@ func (l *LiveExchangeAdapter) readData(ctx context.Context) {
 				continue
 			}
 
+			l.messagesReceived++
+
+			// Log first few messages and then periodically
+			if l.messagesReceived <= 5 || l.messagesReceived%100 == 0 || time.Since(lastLogTime) > 30*time.Second {
+				slog.Info("Received message",
+					"name", l.name,
+					"count", l.messagesReceived,
+					"message", line[:min(len(line), 100)]) // Truncate long messages
+				lastLogTime = time.Now()
+			}
+
 			// Parse market data from line
 			marketData, err := l.parseMarketData(line)
 			if err != nil {
-				slog.Warn("Failed to parse market data", "exchange", l.name, "line", line, "error", err)
+				slog.Warn("Failed to parse market data",
+					"name", l.name,
+					"line", line[:min(len(line), 100)],
+					"error", err)
 				continue
 			}
 
+			// Verify exchange name is set correctly
+			if marketData.Exchange != l.name {
+				slog.Debug("Updated exchange name in market data",
+					"from", marketData.Exchange,
+					"to", l.name)
+				marketData.Exchange = l.name
+			}
+
 			// Send to data channel if running
-			if l.isRunning {
+			l.mu.RLock()
+			running := l.isRunning
+			dataChan := l.dataChan
+			l.mu.RUnlock()
+
+			if running && dataChan != nil {
 				select {
-				case l.dataChan <- *marketData:
+				case dataChan <- *marketData:
+					// Success
 				case <-time.After(100 * time.Millisecond):
-					slog.Warn("Data channel is full, dropping market data", "exchange", l.name)
+					slog.Warn("Data channel is full, dropping market data", "name", l.name)
+				case <-l.stopChan:
+					return
 				}
 			}
 		}
 	}
+}
+
+// Helper function since min doesn't exist in older Go versions
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (l *LiveExchangeAdapter) parseMarketData(line string) (*domain.MarketData, error) {
@@ -212,15 +341,25 @@ func (l *LiveExchangeAdapter) parseJSONMarketData(data map[string]interface{}) (
 		return nil, fmt.Errorf("missing price in JSON data")
 	}
 
-	// Parse timestamp
+	// Parse timestamp - handle both seconds and milliseconds
 	if timestamp, ok := data["timestamp"].(float64); ok {
-		marketData.Timestamp = int64(timestamp)
+		// If timestamp is in milliseconds (> year 2100), convert to seconds
+		if timestamp > 4000000000 {
+			marketData.Timestamp = int64(timestamp / 1000)
+		} else {
+			marketData.Timestamp = int64(timestamp)
+		}
 	} else if timestampStr, ok := data["timestamp"].(string); ok {
 		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		marketData.Timestamp = timestamp
+		// If timestamp is in milliseconds, convert to seconds
+		if timestamp > 4000000000 {
+			marketData.Timestamp = timestamp / 1000
+		} else {
+			marketData.Timestamp = timestamp
+		}
 	} else {
 		// Use current time if no timestamp provided
 		marketData.Timestamp = time.Now().Unix()
@@ -233,15 +372,28 @@ func (l *LiveExchangeAdapter) handleReconnection(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	reconnectAttempts := 0
+
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("Reconnection handler context cancelled", "name", l.name)
 			return
 		case <-l.stopChan:
+			slog.Info("Reconnection handler stop signal received", "name", l.name)
 			return
 		case <-ticker.C:
-			if !l.isHealthy && l.isRunning {
-				slog.Info("Attempting to reconnect", "exchange", l.name)
+			l.mu.RLock()
+			healthy := l.isHealthy
+			running := l.isRunning
+			l.mu.RUnlock()
+
+			if !healthy && running {
+				reconnectAttempts++
+				slog.Info("Connection unhealthy, attempting to reconnect",
+					"name", l.name,
+					"reconnect_attempt", reconnectAttempts,
+					"total_connection_attempts", l.connectionAttempts)
 
 				// Close existing connection
 				if l.conn != nil {
@@ -250,12 +402,32 @@ func (l *LiveExchangeAdapter) handleReconnection(ctx context.Context) {
 
 				// Try to reconnect
 				if err := l.connect(); err != nil {
-					slog.Error("Failed to reconnect", "exchange", l.name, "error", err)
+					slog.Error("Reconnection failed",
+						"name", l.name,
+						"reconnect_attempt", reconnectAttempts,
+						"error", err)
+
+					// Check if we should give up
+					if reconnectAttempts > 10 {
+						slog.Error("Too many reconnection failures, giving up",
+							"name", l.name,
+							"reconnect_attempts", reconnectAttempts)
+						l.mu.Lock()
+						l.isRunning = false
+						l.mu.Unlock()
+						return
+					}
 					continue
 				}
 
+				l.mu.Lock()
 				l.isHealthy = true
-				slog.Info("Reconnected successfully", "exchange", l.name)
+				l.mu.Unlock()
+
+				reconnectAttempts = 0
+				slog.Info("Reconnected successfully",
+					"name", l.name,
+					"total_connection_attempts", l.connectionAttempts)
 
 				// Restart reading data
 				go l.readData(ctx)

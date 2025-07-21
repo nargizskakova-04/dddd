@@ -22,9 +22,7 @@ type ExchangeService struct {
 	currentMode string
 	modeMutex   sync.RWMutex
 
-	// Exchange adapters
-	liveAdapters   []port.ExchangeAdapter
-	testAdapters   []port.ExchangeAdapter
+	// Current active adapters (created dynamically)
 	activeAdapters []port.ExchangeAdapter
 
 	// Concurrency channels
@@ -50,41 +48,18 @@ type ExchangeService struct {
 func NewExchangeService(cfg *config.Config, cache port.Cache) port.ExchangeService {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create live adapters from configuration
-	liveAdapters := make([]port.ExchangeAdapter, 0)
-	for _, exchangeConfig := range cfg.Exchanges.LiveExchanges {
-		adapter := exchanges.NewLiveExchangeAdapter(
-			exchangeConfig.Host,
-			exchangeConfig.Port,
-			exchangeConfig.Name,
-		)
-		liveAdapters = append(liveAdapters, adapter)
-		slog.Info("Created live adapter", "name", exchangeConfig.Name, "port", exchangeConfig.Port)
-	}
-
-	// Create test adapters from configuration
-	testAdapters := make([]port.ExchangeAdapter, 0)
-	for _, exchangeConfig := range cfg.Exchanges.TestExchanges {
-		adapter := exchanges.NewLiveExchangeAdapter(
-			exchangeConfig.Host,
-			exchangeConfig.Port,
-			exchangeConfig.Name,
-		)
-		testAdapters = append(testAdapters, adapter)
-		slog.Info("Created test adapter", "name", exchangeConfig.Name, "port", exchangeConfig.Port)
-	}
-
 	numWorkers := 15 // 5 workers per exchange
+
+	// Start with live adapters
+	liveAdapters := createLiveAdapters(cfg)
 
 	return &ExchangeService{
 		config:             cfg,
 		currentMode:        "live", // Default to live mode
-		liveAdapters:       liveAdapters,
-		testAdapters:       testAdapters,
 		activeAdapters:     liveAdapters,
-		aggregatedDataChan: make(chan domain.MarketData, 1000),
+		aggregatedDataChan: make(chan domain.MarketData, 5000),
 		workerPool:         make([]chan domain.MarketData, numWorkers),
-		resultChan:         make(chan domain.MarketData, 1000),
+		resultChan:         make(chan domain.MarketData, 10000),
 		ctx:                ctx,
 		cancel:             cancel,
 		numWorkers:         numWorkers,
@@ -92,32 +67,94 @@ func NewExchangeService(cfg *config.Config, cache port.Cache) port.ExchangeServi
 	}
 }
 
-func (e *ExchangeService) SwitchToLiveMode(ctx context.Context) error {
-	e.modeMutex.Lock()
-	defer e.modeMutex.Unlock()
+// createLiveAdapters creates adapters for live mode (ports 40101-40103)
+func createLiveAdapters(cfg *config.Config) []port.ExchangeAdapter {
+	adapters := make([]port.ExchangeAdapter, 0)
 
+	for _, exchangeConfig := range cfg.Exchanges.LiveExchanges {
+		adapter := exchanges.NewLiveExchangeAdapter(
+			exchangeConfig.Host,
+			exchangeConfig.Port,
+			exchangeConfig.Name,
+		)
+		adapters = append(adapters, adapter)
+		slog.Info("Created LIVE adapter",
+			"name", exchangeConfig.Name,
+			"host", exchangeConfig.Host,
+			"port", exchangeConfig.Port)
+	}
+
+	return adapters
+}
+
+// createTestAdapters creates adapters for test mode (ports 50101-50103)
+func createTestAdapters(cfg *config.Config) []port.ExchangeAdapter {
+	adapters := make([]port.ExchangeAdapter, 0)
+
+	for _, exchangeConfig := range cfg.Exchanges.TestExchanges {
+		adapter := exchanges.NewLiveExchangeAdapter(
+			exchangeConfig.Host,
+			exchangeConfig.Port,
+			exchangeConfig.Name,
+		)
+		adapters = append(adapters, adapter)
+		slog.Info("Created TEST adapter",
+			"name", exchangeConfig.Name,
+			"host", exchangeConfig.Host,
+			"port", exchangeConfig.Port)
+	}
+
+	return adapters
+}
+
+func (e *ExchangeService) SwitchToLiveMode(ctx context.Context) error {
+	slog.Info("=== SwitchToLiveMode called ===")
+
+	// Check current mode without holding lock for too long
+	e.modeMutex.RLock()
 	if e.currentMode == "live" {
+		e.modeMutex.RUnlock()
 		slog.Info("Already in live mode, no action needed")
 		return nil
 	}
+	e.modeMutex.RUnlock()
 
-	slog.Info("Switching to live mode...")
+	slog.Info("Switching to LIVE mode (ports 40101-40103)...")
 
-	// Stop data processing
-	e.runMutex.Lock()
-	wasRunning := e.isRunning
-	e.runMutex.Unlock()
-
+	// Stop data processing first
+	wasRunning := e.IsRunning()
 	if wasRunning {
 		slog.Info("Stopping data processing before mode switch...")
-		if err := e.stopDataProcessingUnsafe(); err != nil {
+		if err := e.StopDataProcessing(); err != nil {
 			return fmt.Errorf("failed to stop data processing: %w", err)
 		}
 	}
 
-	// Switch to live adapters
-	e.activeAdapters = e.liveAdapters
+	// Stop old adapters
+	e.modeMutex.Lock()
+	oldAdapters := e.activeAdapters
+	e.modeMutex.Unlock()
+
+	slog.Info("Stopping old adapters...", "count", len(oldAdapters))
+	for _, adapter := range oldAdapters {
+		if err := adapter.Stop(); err != nil {
+			slog.Error("Failed to stop old adapter", "name", adapter.Name(), "error", err)
+		} else {
+			slog.Info("Stopped old adapter", "name", adapter.Name())
+		}
+	}
+
+	// Create new LIVE adapters
+	slog.Info("Creating new LIVE adapters...")
+	newAdapters := createLiveAdapters(e.config)
+
+	// Update mode and adapters
+	e.modeMutex.Lock()
+	e.activeAdapters = newAdapters
 	e.currentMode = "live"
+	e.modeMutex.Unlock()
+
+	slog.Info("Mode switched to LIVE", "adapters", len(newAdapters))
 
 	// Clear cache to remove old test data
 	if err := e.clearCacheData(ctx); err != nil {
@@ -126,42 +163,64 @@ func (e *ExchangeService) SwitchToLiveMode(ctx context.Context) error {
 
 	// Restart data processing if it was running
 	if wasRunning {
-		slog.Info("Restarting data processing in live mode...")
-		if err := e.startDataProcessingUnsafe(ctx); err != nil {
+		slog.Info("Restarting data processing in LIVE mode...")
+		if err := e.StartDataProcessing(ctx); err != nil {
 			return fmt.Errorf("failed to restart data processing: %w", err)
 		}
 	}
 
-	slog.Info("Successfully switched to live mode")
+	slog.Info("=== Successfully switched to LIVE mode ===")
 	return nil
 }
 
 func (e *ExchangeService) SwitchToTestMode(ctx context.Context) error {
-	e.modeMutex.Lock()
-	defer e.modeMutex.Unlock()
+	slog.Info("=== SwitchToTestMode called ===")
 
+	// Check current mode without holding lock for too long
+	e.modeMutex.RLock()
 	if e.currentMode == "test" {
+		e.modeMutex.RUnlock()
 		slog.Info("Already in test mode, no action needed")
 		return nil
 	}
+	e.modeMutex.RUnlock()
 
-	slog.Info("Switching to test mode...")
+	slog.Info("Switching to TEST mode (ports 50101-50103)...")
 
-	// Stop data processing
-	e.runMutex.Lock()
-	wasRunning := e.isRunning
-	e.runMutex.Unlock()
-
+	// Stop data processing first
+	wasRunning := e.IsRunning()
 	if wasRunning {
 		slog.Info("Stopping data processing before mode switch...")
-		if err := e.stopDataProcessingUnsafe(); err != nil {
+		if err := e.StopDataProcessing(); err != nil {
 			return fmt.Errorf("failed to stop data processing: %w", err)
 		}
 	}
 
-	// Switch to test adapters
-	e.activeAdapters = e.testAdapters
+	// Stop old adapters
+	e.modeMutex.Lock()
+	oldAdapters := e.activeAdapters
+	e.modeMutex.Unlock()
+
+	slog.Info("Stopping old adapters...", "count", len(oldAdapters))
+	for _, adapter := range oldAdapters {
+		if err := adapter.Stop(); err != nil {
+			slog.Error("Failed to stop old adapter", "name", adapter.Name(), "error", err)
+		} else {
+			slog.Info("Stopped old adapter", "name", adapter.Name())
+		}
+	}
+
+	// Create new TEST adapters
+	slog.Info("Creating new TEST adapters...")
+	newAdapters := createTestAdapters(e.config)
+
+	// Update mode and adapters
+	e.modeMutex.Lock()
+	e.activeAdapters = newAdapters
 	e.currentMode = "test"
+	e.modeMutex.Unlock()
+
+	slog.Info("Mode switched to TEST", "adapters", len(newAdapters))
 
 	// Clear cache to remove old live data
 	if err := e.clearCacheData(ctx); err != nil {
@@ -170,13 +229,13 @@ func (e *ExchangeService) SwitchToTestMode(ctx context.Context) error {
 
 	// Restart data processing if it was running
 	if wasRunning {
-		slog.Info("Restarting data processing in test mode...")
-		if err := e.startDataProcessingUnsafe(ctx); err != nil {
+		slog.Info("Restarting data processing in TEST mode...")
+		if err := e.StartDataProcessing(ctx); err != nil {
 			return fmt.Errorf("failed to restart data processing: %w", err)
 		}
 	}
 
-	slog.Info("Successfully switched to test mode")
+	slog.Info("=== Successfully switched to TEST mode ===")
 	return nil
 }
 
@@ -189,14 +248,13 @@ func (e *ExchangeService) GetCurrentMode() string {
 func (e *ExchangeService) StartDataProcessing(ctx context.Context) error {
 	e.runMutex.Lock()
 	defer e.runMutex.Unlock()
-	return e.startDataProcessingUnsafe(ctx)
-}
 
-func (e *ExchangeService) startDataProcessingUnsafe(ctx context.Context) error {
 	if e.isRunning {
-		return nil // Already running
+		slog.Info("Data processing is already running")
+		return nil
 	}
 
+	// Get current adapters safely
 	e.modeMutex.RLock()
 	currentMode := e.currentMode
 	adapters := make([]port.ExchangeAdapter, len(e.activeAdapters))
@@ -208,27 +266,63 @@ func (e *ExchangeService) startDataProcessingUnsafe(ctx context.Context) error {
 		"workers", e.numWorkers,
 		"adapters", len(adapters))
 
+	// Log adapter details for debugging
+	for i, adapter := range adapters {
+		slog.Info("Will start adapter",
+			"index", i,
+			"name", adapter.Name(),
+			"mode", currentMode)
+	}
+
+	// Create fresh context and channels
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.aggregatedDataChan = make(chan domain.MarketData, 5000)
+	e.resultChan = make(chan domain.MarketData, 10000)
+
 	// Initialize worker pool channels
+	e.workerPool = make([]chan domain.MarketData, e.numWorkers)
 	for i := 0; i < e.numWorkers; i++ {
-		e.workerPool[i] = make(chan domain.MarketData, 100)
+		e.workerPool[i] = make(chan domain.MarketData, 500)
 	}
 
 	// Start exchange adapters and collect their channels
 	var inputChannels []<-chan domain.MarketData
+	successfulAdapters := 0
+
 	for _, adapter := range adapters {
 		slog.Info("Starting adapter...", "name", adapter.Name())
+
 		dataChan, err := adapter.Start(e.ctx)
 		if err != nil {
 			slog.Error("Failed to start adapter", "adapter", adapter.Name(), "error", err)
 			continue
 		}
+
 		inputChannels = append(inputChannels, dataChan)
-		slog.Info("Successfully started adapter", "name", adapter.Name(), "healthy", adapter.IsHealthy())
+		successfulAdapters++
+
+		// Check adapter health after starting
+		time.Sleep(100 * time.Millisecond) // Give it a moment to connect
+		healthy := adapter.IsHealthy()
+
+		slog.Info("Adapter started",
+			"name", adapter.Name(),
+			"healthy", healthy)
+
+		if !healthy {
+			slog.Warn("Adapter started but is not healthy - check if target port is available",
+				"name", adapter.Name())
+		}
 	}
 
 	if len(inputChannels) == 0 {
 		return fmt.Errorf("no exchange adapters started successfully")
 	}
+
+	slog.Info("Started adapters successfully",
+		"total", len(adapters),
+		"successful", successfulAdapters,
+		"mode", currentMode)
 
 	// Start concurrency pipeline
 	e.wg.Add(1)
@@ -253,23 +347,23 @@ func (e *ExchangeService) startDataProcessingUnsafe(ctx context.Context) error {
 func (e *ExchangeService) StopDataProcessing() error {
 	e.runMutex.Lock()
 	defer e.runMutex.Unlock()
-	return e.stopDataProcessingUnsafe()
-}
 
-func (e *ExchangeService) stopDataProcessingUnsafe() error {
 	if !e.isRunning {
-		return nil // Already stopped
+		slog.Info("Data processing is already stopped")
+		return nil
 	}
 
 	slog.Info("Stopping data processing...")
 
-	// Stop all adapters
+	// Stop all adapters first
 	if err := e.stopCurrentAdapters(); err != nil {
 		slog.Error("Failed to stop adapters", "error", err)
 	}
 
 	// Cancel context to stop all goroutines
-	e.cancel()
+	if e.cancel != nil {
+		e.cancel()
+	}
 
 	// Wait for all goroutines to finish with timeout
 	done := make(chan struct{})
@@ -281,11 +375,11 @@ func (e *ExchangeService) stopDataProcessingUnsafe() error {
 	select {
 	case <-done:
 		slog.Info("All goroutines stopped")
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		slog.Warn("Timeout waiting for goroutines to stop")
 	}
 
-	// Close worker channels
+	// Close worker channels safely
 	for i, workerChan := range e.workerPool {
 		if workerChan != nil {
 			close(workerChan)
@@ -293,16 +387,11 @@ func (e *ExchangeService) stopDataProcessingUnsafe() error {
 		}
 	}
 
-	// Close result channel
+	// Close result channel safely
 	if e.resultChan != nil {
 		close(e.resultChan)
+		e.resultChan = nil
 	}
-
-	// Recreate context and channels for next start
-	e.ctx, e.cancel = context.WithCancel(context.Background())
-	e.aggregatedDataChan = make(chan domain.MarketData, 1000)
-	e.resultChan = make(chan domain.MarketData, 1000)
-	e.workerPool = make([]chan domain.MarketData, e.numWorkers)
 
 	e.isRunning = false
 	slog.Info("Data processing stopped")
@@ -310,6 +399,8 @@ func (e *ExchangeService) stopDataProcessingUnsafe() error {
 }
 
 func (e *ExchangeService) GetDataStream() <-chan domain.MarketData {
+	e.runMutex.RLock()
+	defer e.runMutex.RUnlock()
 	return e.resultChan
 }
 
@@ -333,7 +424,11 @@ func (e *ExchangeService) clearCacheData(ctx context.Context) error {
 // Fan-in: Aggregates data from multiple exchange channels into one
 func (e *ExchangeService) fanIn(inputChannels []<-chan domain.MarketData) {
 	defer e.wg.Done()
-	defer close(e.aggregatedDataChan)
+	defer func() {
+		if e.aggregatedDataChan != nil {
+			close(e.aggregatedDataChan)
+		}
+	}()
 
 	slog.Info("Starting fan-in aggregator", "inputs", len(inputChannels))
 
@@ -345,27 +440,34 @@ func (e *ExchangeService) fanIn(inputChannels []<-chan domain.MarketData) {
 		go func(id int, inputChan <-chan domain.MarketData) {
 			defer fanInWg.Done()
 
+			messageCount := 0
 			for {
 				select {
 				case data, ok := <-inputChan:
 					if !ok {
-						slog.Info("Input channel closed", "channel", id)
+						slog.Info("Input channel closed", "channel", id, "messages_received", messageCount)
 						return
 					}
 
-					slog.Debug("Received data from channel",
-						"channel", id,
-						"symbol", data.Symbol,
-						"exchange", data.Exchange,
-						"price", data.Price)
+					messageCount++
+					if messageCount%100 == 1 {
+						slog.Debug("Receiving data from channel",
+							"channel", id,
+							"symbol", data.Symbol,
+							"exchange", data.Exchange,
+							"price", data.Price,
+							"count", messageCount)
+					}
 
 					select {
 					case e.aggregatedDataChan <- data:
 					case <-e.ctx.Done():
+						slog.Info("Fan-in context cancelled", "channel", id, "messages_received", messageCount)
 						return
 					}
 
 				case <-e.ctx.Done():
+					slog.Info("Fan-in context cancelled", "channel", id, "messages_received", messageCount)
 					return
 				}
 			}
@@ -396,7 +498,7 @@ func (e *ExchangeService) distributor() {
 			select {
 			case e.workerPool[workerIndex] <- data:
 				distributedCount++
-				if distributedCount%100 == 0 {
+				if distributedCount%500 == 0 {
 					slog.Debug("Distributor stats", "distributed", distributedCount)
 				}
 				workerIndex = (workerIndex + 1) % e.numWorkers
@@ -438,7 +540,7 @@ func (e *ExchangeService) worker(id int, workerChan <-chan domain.MarketData) {
 			select {
 			case e.resultChan <- processedData:
 				processedCount++
-				if processedCount%50 == 0 {
+				if processedCount%200 == 0 {
 					slog.Debug("Worker stats", "id", id, "processed", processedCount)
 				}
 			case <-time.After(100 * time.Millisecond):
@@ -483,9 +585,14 @@ func (e *ExchangeService) processMarketData(data domain.MarketData) domain.Marke
 
 // stopCurrentAdapters stops all currently active adapters
 func (e *ExchangeService) stopCurrentAdapters() error {
+	e.modeMutex.RLock()
+	adapters := make([]port.ExchangeAdapter, len(e.activeAdapters))
+	copy(adapters, e.activeAdapters)
+	e.modeMutex.RUnlock()
+
 	var errors []error
 
-	for _, adapter := range e.activeAdapters {
+	for _, adapter := range adapters {
 		if err := adapter.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to stop adapter %s: %w", adapter.Name(), err))
 		} else {
@@ -539,6 +646,14 @@ func (e *ExchangeService) GetStats() map[string]interface{} {
 		})
 	}
 
+	var aggregatedBuffer, resultBuffer int
+	if e.aggregatedDataChan != nil {
+		aggregatedBuffer = len(e.aggregatedDataChan)
+	}
+	if e.resultChan != nil {
+		resultBuffer = len(e.resultChan)
+	}
+
 	return map[string]interface{}{
 		"current_mode":      e.currentMode,
 		"is_running":        e.isRunning,
@@ -546,7 +661,7 @@ func (e *ExchangeService) GetStats() map[string]interface{} {
 		"healthy_adapters":  healthyAdapters,
 		"adapter_details":   adapterDetails,
 		"num_workers":       e.numWorkers,
-		"aggregated_buffer": len(e.aggregatedDataChan),
-		"result_buffer":     len(e.resultChan),
+		"aggregated_buffer": aggregatedBuffer,
+		"result_buffer":     resultBuffer,
 	}
 }

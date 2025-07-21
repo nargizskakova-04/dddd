@@ -48,8 +48,9 @@ type TestGenerator struct {
 type SymbolData struct {
 	BasePrice    float64
 	CurrentPrice float64
-	Volatility   float64 // percentage as decimal (0.02 = 2%)
-	Trend        float64 // 1.0 for up, -1.0 for down
+	Volatility   float64      // percentage as decimal (0.02 = 2%)
+	Trend        float64      // 1.0 for up, -1.0 for down
+	mu           sync.RWMutex // Add mutex for thread safety
 }
 
 func main() {
@@ -209,8 +210,15 @@ func (s *ExchangeServer) acceptConnections() {
 		case <-s.ctx.Done():
 			return
 		default:
+			// Set accept timeout to avoid blocking forever
+			s.listener.(*net.TCPListener).SetDeadline(time.Now().Add(1 * time.Second))
+
 			conn, err := s.listener.Accept()
 			if err != nil {
+				// Check if it's a timeout or context cancellation
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
 				if !strings.Contains(err.Error(), "use of closed network connection") {
 					slog.Error("Failed to accept connection", "server", s.name, "error", err)
 				}
@@ -242,8 +250,24 @@ func (s *ExchangeServer) handleClient(conn net.Conn) {
 		slog.Info("Client disconnected", "server", s.name, "clients", clientCount)
 	}()
 
-	// Wait for context cancellation (client will be handled by broadcast)
-	<-s.ctx.Done()
+	// Keep connection alive until context is cancelled
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+			// Set a read deadline to detect disconnections
+			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
+			// Try to read from connection to detect if client disconnected
+			buffer := make([]byte, 1024)
+			_, err := conn.Read(buffer)
+			if err != nil {
+				// Client disconnected or error occurred
+				return
+			}
+		}
+	}
 }
 
 // BroadcastData sends market data to all connected clients
@@ -268,13 +292,16 @@ func (s *ExchangeServer) BroadcastData(data MarketData) {
 	disconnectedClients := make([]net.Conn, 0)
 
 	for client := range s.clients {
+		// Set write deadline to avoid blocking
+		client.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
 		if _, err := client.Write(jsonData); err != nil {
 			// Client disconnected, mark for removal
 			disconnectedClients = append(disconnectedClients, client)
 		}
 	}
 
-	// Remove disconnected clients
+	// Remove disconnected clients outside the read lock
 	if len(disconnectedClients) > 0 {
 		s.clientsMux.RUnlock()
 		s.clientsMux.Lock()
@@ -319,9 +346,11 @@ func (g *TestGenerator) generateDataForSymbol(server *ExchangeServer, symbol str
 	seed := time.Now().UnixNano() + int64(len(symbol)*server.port)
 	rng := rand.New(rand.NewSource(seed))
 
-	// Variable interval between updates (100ms to 2000ms)
-	ticker := time.NewTicker(time.Duration(100+rng.Intn(1900)) * time.Millisecond)
+	// Variable interval between updates (500ms to 3000ms for more realistic intervals)
+	ticker := time.NewTicker(time.Duration(500+rng.Intn(2500)) * time.Millisecond)
 	defer ticker.Stop()
+
+	messageCount := 0
 
 	for {
 		select {
@@ -329,26 +358,39 @@ func (g *TestGenerator) generateDataForSymbol(server *ExchangeServer, symbol str
 			return
 		case <-ticker.C:
 			// Generate next price
-			symbolData.CurrentPrice = g.generateNextPrice(rng, symbolData)
+			newPrice := g.generateNextPrice(rng, symbolData)
+
+			// Update current price thread-safely
+			symbolData.mu.Lock()
+			symbolData.CurrentPrice = newPrice
+			symbolData.mu.Unlock()
 
 			// Create market data
 			data := MarketData{
 				Symbol:    symbol,
-				Price:     symbolData.CurrentPrice,
+				Price:     newPrice,
 				Timestamp: time.Now().UnixMilli(), // Unix timestamp in milliseconds
 			}
 
 			// Broadcast to clients
 			server.BroadcastData(data)
 
+			messageCount++
+			if messageCount%50 == 0 {
+				slog.Debug("Generated messages", "server", server.name, "symbol", symbol, "count", messageCount, "price", newPrice)
+			}
+
 			// Randomize next interval
-			ticker.Reset(time.Duration(100+rng.Intn(1900)) * time.Millisecond)
+			ticker.Reset(time.Duration(500+rng.Intn(2500)) * time.Millisecond)
 		}
 	}
 }
 
 // generateNextPrice creates the next price using realistic market movements
 func (g *TestGenerator) generateNextPrice(rng *rand.Rand, symbolData *SymbolData) float64 {
+	symbolData.mu.Lock()
+	defer symbolData.mu.Unlock()
+
 	// Random walk with trend
 	change := rng.NormFloat64() * symbolData.Volatility * symbolData.CurrentPrice
 
@@ -442,5 +484,5 @@ func (g *TestGenerator) Shutdown() {
 	}
 
 	// Give time for connections to close
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 }

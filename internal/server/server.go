@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"cryptomarket/internal/adapters/cache"
@@ -37,15 +38,22 @@ type App struct {
 	// For graceful shutdown
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Batch processing
+	batchMutex sync.Mutex
+	batch      []domain.MarketData
+	batchSize  int
 }
 
 func NewApp(cfg *config.Config) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &App{
-		cfg:    cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		cfg:       cfg,
+		ctx:       ctx,
+		cancel:    cancel,
+		batch:     make([]domain.MarketData, 0),
+		batchSize: 100, // Process in batches of 100
 	}
 }
 
@@ -175,6 +183,16 @@ func (app *App) handleDebugStats(w http.ResponseWriter, r *http.Request) {
 		stats["cache_status"] = "unavailable"
 	}
 
+	// Batch processing stats
+	app.batchMutex.Lock()
+	batchSize := len(app.batch)
+	app.batchMutex.Unlock()
+
+	stats["batch_processing"] = map[string]interface{}{
+		"current_batch_size": batchSize,
+		"max_batch_size":     app.batchSize,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		http.Error(w, "Failed to encode stats", http.StatusInternalServerError)
@@ -200,77 +218,189 @@ func (app *App) startMarketDataProcessor() {
 	// Get data stream from exchange service
 	dataStream := app.exchangeService.GetDataStream()
 
-	// Process incoming market data
-	go app.processMarketData(dataStream)
+	// Start multiple processors for better performance
+	numProcessors := 3
+	for i := 0; i < numProcessors; i++ {
+		go app.processMarketData(dataStream, i)
+	}
+
+	// Start batch flusher
+	go app.batchFlusher()
 
 	// Start cleanup routine for Redis
 	if app.cacheAdapter != nil {
 		go app.startCleanupRoutine()
 	}
 
-	slog.Info("Market data processor started successfully")
+	slog.Info("Market data processor started successfully", "processors", numProcessors)
 }
 
-// processMarketData handles incoming market data and stores it in cache
-func (app *App) processMarketData(dataStream <-chan domain.MarketData) {
-	slog.Info("Starting market data processing goroutine...")
+// processMarketData handles incoming market data and stores it in cache (optimized)
+func (app *App) processMarketData(dataStream <-chan domain.MarketData, processorID int) {
+	slog.Info("Starting market data processing goroutine", "processor", processorID)
 	processedCount := 0
+	lastLogTime := time.Now()
 
 	for {
 		select {
 		case data, ok := <-dataStream:
 			if !ok {
-				slog.Info("Market data stream closed", "processed", processedCount)
+				slog.Info("Market data stream closed", "processor", processorID, "processed", processedCount)
 				return
 			}
 
 			processedCount++
 
-			// Log sample data for debugging
-			if processedCount%100 == 0 {
-				slog.Info("Processing market data",
+			// Log stats every 30 seconds instead of every 100 messages
+			now := time.Now()
+			if now.Sub(lastLogTime) > 30*time.Second {
+				slog.Info("Processing market data stats",
+					"processor", processorID,
 					"count", processedCount,
-					"symbol", data.Symbol,
-					"exchange", data.Exchange,
-					"price", data.Price)
+					"rate", float64(processedCount)/now.Sub(lastLogTime.Add(-30*time.Second)).Seconds())
+				lastLogTime = now
 			}
 
-			// Store in Redis cache if available
-			if app.cacheAdapter != nil {
-				key := fmt.Sprintf("%s:%s", data.Symbol, data.Exchange)
-
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := app.cacheAdapter.SetPrice(ctx, key, data); err != nil {
-					slog.Error("Failed to store price in cache",
-						"error", err,
-						"symbol", data.Symbol,
-						"exchange", data.Exchange)
-				}
-				cancel()
-			}
-
-			// TODO: Implement batching and PostgreSQL storage
+			// Add to batch for Redis processing
+			app.addToBatch(data)
 
 		case <-app.ctx.Done():
-			slog.Info("Market data processing stopped", "processed", processedCount)
+			slog.Info("Market data processing stopped", "processor", processorID, "processed", processedCount)
 			return
 		}
 	}
 }
 
-// startCleanupRoutine cleans up old data from Redis
-func (app *App) startCleanupRoutine() {
-	ticker := time.NewTicker(30 * time.Second) // Clean up every 30 seconds
+// addToBatch adds data to batch for efficient processing
+func (app *App) addToBatch(data domain.MarketData) {
+	app.batchMutex.Lock()
+	defer app.batchMutex.Unlock()
+
+	app.batch = append(app.batch, data)
+
+	// If batch is full, process immediately
+	if len(app.batch) >= app.batchSize {
+		app.processBatchUnsafe()
+	}
+}
+
+// batchFlusher periodically flushes partial batches
+func (app *App) batchFlusher() {
+	ticker := time.NewTicker(2 * time.Second) // Flush every 2 seconds
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			app.batchMutex.Lock()
+			if len(app.batch) > 0 {
+				app.processBatchUnsafe()
+			}
+			app.batchMutex.Unlock()
 
-			// Clean up data older than 2 minutes
-			if err := app.cacheAdapter.CleanupOldData(ctx, 2*time.Minute); err != nil {
+		case <-app.ctx.Done():
+			slog.Info("Batch flusher stopped")
+			// Process remaining batch
+			app.batchMutex.Lock()
+			if len(app.batch) > 0 {
+				app.processBatchUnsafe()
+			}
+			app.batchMutex.Unlock()
+			return
+		}
+	}
+}
+
+// processBatchUnsafe processes current batch (must be called with batchMutex held)
+func (app *App) processBatchUnsafe() {
+	if len(app.batch) == 0 {
+		return
+	}
+
+	batchSize := len(app.batch)
+	slog.Debug("Processing batch", "size", batchSize)
+
+	// Process batch asynchronously to avoid blocking
+	batchCopy := make([]domain.MarketData, len(app.batch))
+	copy(batchCopy, app.batch)
+	app.batch = app.batch[:0] // Clear batch
+
+	// Process in background
+	go app.processBatchAsync(batchCopy)
+}
+
+// processBatchAsync processes a batch of market data asynchronously
+func (app *App) processBatchAsync(batch []domain.MarketData) {
+	if app.cacheAdapter == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	successCount := 0
+	errorCount := 0
+
+	// Process in smaller sub-batches for better performance
+	subBatchSize := 20
+	for i := 0; i < len(batch); i += subBatchSize {
+		end := i + subBatchSize
+		if end > len(batch) {
+			end = len(batch)
+		}
+
+		// Process sub-batch
+		for j := i; j < end; j++ {
+			data := batch[j]
+			key := fmt.Sprintf("%s:%s", data.Symbol, data.Exchange)
+
+			if err := app.cacheAdapter.SetPrice(ctx, key, data); err != nil {
+				errorCount++
+				if errorCount%10 == 1 { // Log every 10th error to avoid spam
+					slog.Error("Failed to store price in cache",
+						"error", err,
+						"symbol", data.Symbol,
+						"exchange", data.Exchange)
+				}
+			} else {
+				successCount++
+			}
+		}
+
+		// Small delay between sub-batches to avoid overwhelming Redis
+		select {
+		case <-time.After(1 * time.Millisecond):
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	if errorCount > 0 {
+		slog.Warn("Batch processing completed with errors",
+			"total", len(batch),
+			"success", successCount,
+			"errors", errorCount)
+	} else {
+		slog.Debug("Batch processing completed successfully",
+			"processed", successCount)
+	}
+}
+
+// startCleanupRoutine cleans up old data from Redis (optimized)
+func (app *App) startCleanupRoutine() {
+	ticker := time.NewTicker(60 * time.Second) // Clean up every minute
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+			// Clean up data older than 5 minutes (increased from 2)
+			if err := app.cacheAdapter.CleanupOldData(ctx, 5*time.Minute); err != nil {
 				slog.Error("Failed to cleanup old data", "error", err)
+			} else {
+				slog.Debug("Cleanup completed successfully")
 			}
 
 			cancel()
@@ -304,6 +434,14 @@ func (app *App) Shutdown() error {
 
 	// Cancel context to stop all goroutines
 	app.cancel()
+
+	// Process remaining batch
+	app.batchMutex.Lock()
+	if len(app.batch) > 0 {
+		slog.Info("Processing remaining batch before shutdown", "size", len(app.batch))
+		app.processBatchUnsafe()
+	}
+	app.batchMutex.Unlock()
 
 	// Stop exchange service
 	if app.exchangeService != nil {
