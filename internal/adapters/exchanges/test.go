@@ -1,234 +1,265 @@
 package exchanges
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
-	"math"
-	"math/rand"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"cryptomarket/internal/core/domain"
 	"cryptomarket/internal/core/port"
 )
 
-// TestExchangeAdapter generates synthetic market data using the Generator pattern
+// TestExchangeAdapter connects to real exchange programs via TCP
 type TestExchangeAdapter struct {
-	name       string
-	dataChan   chan domain.MarketData
-	stopChan   chan struct{}
-	isRunning  bool
-	symbols    []string
-	basePrices map[string]float64
-	volatility map[string]float64
+	host      string
+	port      int
+	name      string
+	conn      net.Conn
+	dataChan  chan domain.MarketData
+	stopChan  chan struct{}
+	isRunning bool
+	isHealthy bool
 }
 
-func NewTestExchangeAdapter(name string) port.ExchangeAdapter {
+func NewTestExchangeAdapter(host string, port int, name string) port.ExchangeAdapter {
 	return &TestExchangeAdapter{
-		name:     name,
-		dataChan: make(chan domain.MarketData, 100),
-		stopChan: make(chan struct{}),
-		symbols:  []string{"BTCUSDT", "DOGEUSDT", "TONUSDT", "SOLUSDT", "ETHUSDT"},
-		basePrices: map[string]float64{
-			"BTCUSDT":  96000.0, // Base price for Bitcoin
-			"DOGEUSDT": 0.32,    // Base price for Dogecoin
-			"TONUSDT":  5.45,    // Base price for Toncoin
-			"SOLUSDT":  210.0,   // Base price for Solana
-			"ETHUSDT":  3300.0,  // Base price for Ethereum
-		},
-		volatility: map[string]float64{
-			"BTCUSDT":  0.02,  // 2% max change
-			"DOGEUSDT": 0.05,  // 5% max change (more volatile)
-			"TONUSDT":  0.04,  // 4% max change
-			"SOLUSDT":  0.03,  // 3% max change
-			"ETHUSDT":  0.025, // 2.5% max change
-		},
+		host:      host,
+		port:      port,
+		name:      name,
+		dataChan:  make(chan domain.MarketData, 100),
+		stopChan:  make(chan struct{}),
+		isHealthy: false,
 	}
 }
 
-func (t *TestExchangeAdapter) Start(ctx context.Context) (<-chan domain.MarketData, error) {
-	if t.isRunning {
-		return t.dataChan, nil
+func (l *TestExchangeAdapter) Start(ctx context.Context) (<-chan domain.MarketData, error) {
+	if l.isRunning {
+		return l.dataChan, nil
 	}
 
-	t.isRunning = true
-
-	// Start data generation in goroutines for each symbol
-	for _, symbol := range t.symbols {
-		go t.generateDataForSymbol(ctx, symbol)
+	// Connect to exchange
+	if err := l.connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to exchange %s: %w", l.name, err)
 	}
 
-	slog.Info("Test exchange adapter started", "exchange", t.name)
-	return t.dataChan, nil
+	l.isRunning = true
+	l.isHealthy = true
+
+	// Start reading data in goroutine
+	go l.readData(ctx)
+
+	// Start reconnection handler
+	go l.handleReconnection(ctx)
+
+	slog.Info("Test exchange adapter started", "exchange", l.name, "port", l.port)
+	return l.dataChan, nil
 }
 
-func (t *TestExchangeAdapter) Stop() error {
-	if !t.isRunning {
+func (l *TestExchangeAdapter) Stop() error {
+	if !l.isRunning {
 		return nil
 	}
 
-	t.isRunning = false
+	l.isRunning = false
+	l.isHealthy = false
 
-	// Close stop channel to signal all goroutines
-	close(t.stopChan)
+	// Close stop channel
+	close(l.stopChan)
+
+	// Close connection
+	if l.conn != nil {
+		l.conn.Close()
+	}
 
 	// Close data channel
-	close(t.dataChan)
+	close(l.dataChan)
 
-	slog.Info("Test exchange adapter stopped", "exchange", t.name)
+	slog.Info("Test exchange adapter stopped", "exchange", l.name)
 	return nil
 }
 
-func (t *TestExchangeAdapter) Name() string {
-	return t.name
+func (l *TestExchangeAdapter) Name() string {
+	return l.name
 }
 
-func (t *TestExchangeAdapter) IsHealthy() bool {
-	return t.isRunning
+func (l *TestExchangeAdapter) IsHealthy() bool {
+	return l.isHealthy
 }
 
-func (t *TestExchangeAdapter) generateDataForSymbol(ctx context.Context, symbol string) {
+func (l *TestExchangeAdapter) connect() error {
+	address := fmt.Sprintf("%s:%d", l.host, l.port)
+	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s: %w", address, err)
+	}
+
+	l.conn = conn
+	return nil
+}
+
+func (l *TestExchangeAdapter) readData(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("Panic in generateDataForSymbol", "exchange", t.name, "symbol", symbol, "panic", r)
+			slog.Error("Panic in readData", "exchange", l.name, "panic", r)
 		}
 	}()
 
-	basePrice := t.basePrices[symbol]
-	currentPrice := basePrice
-	trend := 1.0 // 1.0 for upward, -1.0 for downward
+	scanner := bufio.NewScanner(l.conn)
 
-	// Random seed for this symbol to make it more realistic
-	source := rand.NewSource(time.Now().UnixNano() + int64(len(symbol)*len(t.name)))
-	rng := rand.New(source)
+	for l.isRunning {
+		select {
+		case <-ctx.Done():
+			return
+		case <-l.stopChan:
+			return
+		default:
+			if !scanner.Scan() {
+				if err := scanner.Err(); err != nil {
+					slog.Error("Scanner error", "exchange", l.name, "error", err)
+				}
+				l.isHealthy = false
+				return
+			}
 
-	// Generate price updates every 100ms to 2 seconds
-	ticker := time.NewTicker(time.Duration(100+rng.Intn(1900)) * time.Millisecond)
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+
+			// Parse market data from line
+			marketData, err := l.parseMarketData(line)
+			if err != nil {
+				slog.Warn("Failed to parse market data", "exchange", l.name, "line", line, "error", err)
+				continue
+			}
+
+			// Send to data channel if running
+			if l.isRunning {
+				select {
+				case l.dataChan <- *marketData:
+				case <-time.After(100 * time.Millisecond):
+					slog.Warn("Data channel is full, dropping market data", "exchange", l.name)
+				}
+			}
+		}
+	}
+}
+
+func (l *TestExchangeAdapter) parseMarketData(line string) (*domain.MarketData, error) {
+	// Try to parse as JSON first
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &jsonData); err == nil {
+		return l.parseJSONMarketData(jsonData)
+	}
+
+	// If not JSON, try to parse as simple format
+	// Expected format: "SYMBOL:PRICE" or "SYMBOL PRICE"
+	parts := strings.Fields(line)
+	if len(parts) < 2 {
+		// Try colon separator
+		parts = strings.Split(line, ":")
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("invalid line format: %s", line)
+		}
+	}
+
+	symbol := strings.TrimSpace(parts[0])
+	priceStr := strings.TrimSpace(parts[1])
+
+	price, err := strconv.ParseFloat(priceStr, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse price %s: %w", priceStr, err)
+	}
+
+	return &domain.MarketData{
+		Symbol:    symbol,
+		Price:     price,
+		Timestamp: time.Now().Unix(),
+		Exchange:  l.name,
+	}, nil
+}
+
+func (l *TestExchangeAdapter) parseJSONMarketData(data map[string]interface{}) (*domain.MarketData, error) {
+	marketData := &domain.MarketData{
+		Exchange: l.name,
+	}
+
+	// Parse symbol
+	if symbol, ok := data["symbol"].(string); ok {
+		marketData.Symbol = symbol
+	} else if symbol, ok := data["pair"].(string); ok {
+		marketData.Symbol = symbol
+	} else {
+		return nil, fmt.Errorf("missing symbol in JSON data")
+	}
+
+	// Parse price
+	if price, ok := data["price"].(float64); ok {
+		marketData.Price = price
+	} else if priceStr, ok := data["price"].(string); ok {
+		price, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse price from string: %w", err)
+		}
+		marketData.Price = price
+	} else {
+		return nil, fmt.Errorf("missing price in JSON data")
+	}
+
+	// Parse timestamp
+	if timestamp, ok := data["timestamp"].(float64); ok {
+		marketData.Timestamp = int64(timestamp)
+	} else if timestampStr, ok := data["timestamp"].(string); ok {
+		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse timestamp: %w", err)
+		}
+		marketData.Timestamp = timestamp
+	} else {
+		// Use current time if no timestamp provided
+		marketData.Timestamp = time.Now().Unix()
+	}
+
+	return marketData, nil
+}
+
+func (l *TestExchangeAdapter) handleReconnection(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.stopChan:
+		case <-l.stopChan:
 			return
 		case <-ticker.C:
-			// Generate realistic price movement
-			currentPrice = t.generateNextPrice(rng, symbol, currentPrice, basePrice, &trend)
+			if !l.isHealthy && l.isRunning {
+				slog.Info("Attempting to reconnect", "exchange", l.name)
 
-			marketData := domain.MarketData{
-				Symbol:    symbol,
-				Price:     currentPrice,
-				Timestamp: time.Now().Unix(),
-				Exchange:  t.name,
-			}
-
-			// Send to data channel if running
-			if t.isRunning {
-				select {
-				case t.dataChan <- marketData:
-				case <-time.After(50 * time.Millisecond):
-					// Drop if channel is full
+				// Close existing connection
+				if l.conn != nil {
+					l.conn.Close()
 				}
+
+				// Try to reconnect
+				if err := l.connect(); err != nil {
+					slog.Error("Failed to reconnect", "exchange", l.name, "error", err)
+					continue
+				}
+
+				l.isHealthy = true
+				slog.Info("Reconnected successfully", "exchange", l.name)
+
+				// Restart reading data
+				go l.readData(ctx)
 			}
-
-			// Vary the ticker interval for more realistic data
-			ticker.Reset(time.Duration(100+rng.Intn(1900)) * time.Millisecond)
-		}
-	}
-}
-
-func (t *TestExchangeAdapter) generateNextPrice(rng *rand.Rand, symbol string, currentPrice, basePrice float64, trend *float64) float64 {
-	// Get volatility for this symbol
-	volatility := t.volatility[symbol]
-
-	// Random walk with trend
-	change := rng.NormFloat64() * volatility * currentPrice
-
-	// Add trend bias (10% of the change is trend-based)
-	trendStrength := 0.1
-	change += change * trendStrength * (*trend)
-
-	newPrice := currentPrice + change
-
-	// Ensure price doesn't deviate too much from base price (within 20%)
-	maxDeviation := basePrice * 0.2
-	if newPrice > basePrice+maxDeviation {
-		newPrice = basePrice + maxDeviation
-		*trend = -1.0 // Reverse trend
-	} else if newPrice < basePrice-maxDeviation {
-		newPrice = basePrice - maxDeviation
-		*trend = 1.0 // Reverse trend
-	}
-
-	// Ensure price is positive and has reasonable precision
-	if newPrice <= 0 {
-		newPrice = basePrice * 0.01 // 1% of base price as minimum
-	}
-
-	// Round to appropriate decimal places based on price level
-	newPrice = t.roundPrice(newPrice)
-
-	// Occasionally change trend (5% chance)
-	if rng.Float64() < 0.05 {
-		*trend = -(*trend)
-	}
-
-	// Add some market events simulation (rare spikes/dips)
-	if rng.Float64() < 0.001 { // 0.1% chance
-		eventMultiplier := 1.0 + (rng.Float64()-0.5)*0.1 // ±5% spike
-		newPrice *= eventMultiplier
-		newPrice = t.roundPrice(newPrice)
-		slog.Debug("Market event simulated", "symbol", symbol, "exchange", t.name, "multiplier", eventMultiplier)
-	}
-
-	return newPrice
-}
-
-func (t *TestExchangeAdapter) roundPrice(price float64) float64 {
-	if price > 1000 {
-		// For high-value coins like BTC, round to 2 decimal places
-		return math.Round(price*100) / 100
-	} else if price > 10 {
-		// For medium-value coins, round to 3 decimal places
-		return math.Round(price*1000) / 1000
-	} else {
-		// For low-value coins, round to 4 decimal places
-		return math.Round(price*10000) / 10000
-	}
-}
-
-// GetBasePrices returns the base prices for all symbols (useful for testing)
-func (t *TestExchangeAdapter) GetBasePrices() map[string]float64 {
-	result := make(map[string]float64)
-	for k, v := range t.basePrices {
-		result[k] = v
-	}
-	return result
-}
-
-// GetVolatility returns the volatility settings for all symbols (useful for testing)
-func (t *TestExchangeAdapter) GetVolatility() map[string]float64 {
-	result := make(map[string]float64)
-	for k, v := range t.volatility {
-		result[k] = v
-	}
-	return result
-}
-
-// SetBasePrices allows updating base prices (useful for testing different scenarios)
-func (t *TestExchangeAdapter) SetBasePrices(prices map[string]float64) {
-	for symbol, price := range prices {
-		if _, exists := t.basePrices[symbol]; exists && price > 0 {
-			t.basePrices[symbol] = price
-		}
-	}
-}
-
-// SetVolatility allows updating volatility settings (useful for testing)
-func (t *TestExchangeAdapter) SetVolatility(vol map[string]float64) {
-	for symbol, v := range vol {
-		if _, exists := t.volatility[symbol]; exists && v > 0 && v < 1 {
-			t.volatility[symbol] = v
 		}
 	}
 }

@@ -26,10 +26,13 @@ const (
 
 // Default connection settings
 const (
-	DefaultHost  = "127.0.0.1"
-	DefaultPort1 = 40101
-	DefaultPort2 = 40102
-	DefaultPort3 = 40103
+	DefaultHost = "127.0.0.1"
+	LivePort1   = 40101
+	LivePort2   = 40102
+	LivePort3   = 40103
+	TestPort1   = 50101
+	TestPort2   = 50102
+	TestPort3   = 50103
 )
 
 // ExchangeConfig holds configuration for creating exchange adapters
@@ -43,18 +46,18 @@ type ExchangeConfig struct {
 // CreateLiveExchangeAdapters creates all three live exchange adapters with default settings
 func CreateLiveExchangeAdapters() []port.ExchangeAdapter {
 	return []port.ExchangeAdapter{
-		NewLiveExchangeAdapter(DefaultHost, DefaultPort1, Exchange1Name),
-		NewLiveExchangeAdapter(DefaultHost, DefaultPort2, Exchange2Name),
-		NewLiveExchangeAdapter(DefaultHost, DefaultPort3, Exchange3Name),
+		NewLiveExchangeAdapter(DefaultHost, LivePort1, Exchange1Name),
+		NewLiveExchangeAdapter(DefaultHost, LivePort2, Exchange2Name),
+		NewLiveExchangeAdapter(DefaultHost, LivePort3, Exchange3Name),
 	}
 }
 
 // CreateTestExchangeAdapters creates all three test exchange adapters
 func CreateTestExchangeAdapters() []port.ExchangeAdapter {
 	return []port.ExchangeAdapter{
-		NewTestExchangeAdapter(TestExchange1Name),
-		NewTestExchangeAdapter(TestExchange2Name),
-		NewTestExchangeAdapter(TestExchange3Name),
+		NewTestExchangeAdapter(DefaultHost, TestPort1, TestExchange1Name),
+		NewTestExchangeAdapter(DefaultHost, TestPort2, TestExchange2Name),
+		NewTestExchangeAdapter(DefaultHost, TestPort3, TestExchange3Name),
 	}
 }
 
@@ -64,8 +67,8 @@ func CreateLiveExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
 }
 
 // CreateTestExchangeAdapter creates a single test exchange adapter
-func CreateTestExchangeAdapter(name string) port.ExchangeAdapter {
-	return NewTestExchangeAdapter(name)
+func CreateTestExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
+	return NewTestExchangeAdapter(config.Host, config.Port, config.Name)
 }
 
 // CreateExchangeAdapter creates an exchange adapter based on type
@@ -74,10 +77,10 @@ func CreateExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
 	case ExchangeTypeLive:
 		return CreateLiveExchangeAdapter(config)
 	case ExchangeTypeTest:
-		return CreateTestExchangeAdapter(config.Name)
+		return CreateTestExchangeAdapter(config)
 	default:
 		// Default to test adapter for safety
-		return CreateTestExchangeAdapter(config.Name)
+		return CreateTestExchangeAdapter(config)
 	}
 }
 
@@ -99,19 +102,19 @@ func GetDefaultLiveConfigs() []ExchangeConfig {
 		{
 			Name: Exchange1Name,
 			Host: DefaultHost,
-			Port: DefaultPort1,
+			Port: LivePort1,
 			Type: ExchangeTypeLive,
 		},
 		{
 			Name: Exchange2Name,
 			Host: DefaultHost,
-			Port: DefaultPort2,
+			Port: LivePort2,
 			Type: ExchangeTypeLive,
 		},
 		{
 			Name: Exchange3Name,
 			Host: DefaultHost,
-			Port: DefaultPort3,
+			Port: LivePort3,
 			Type: ExchangeTypeLive,
 		},
 	}
@@ -122,14 +125,20 @@ func GetDefaultTestConfigs() []ExchangeConfig {
 	return []ExchangeConfig{
 		{
 			Name: TestExchange1Name,
+			Host: DefaultHost,
+			Port: TestPort1,
 			Type: ExchangeTypeTest,
 		},
 		{
 			Name: TestExchange2Name,
+			Host: DefaultHost,
+			Port: TestPort2,
 			Type: ExchangeTypeTest,
 		},
 		{
 			Name: TestExchange3Name,
+			Host: DefaultHost,
+			Port: TestPort3,
 			Type: ExchangeTypeTest,
 		},
 	}

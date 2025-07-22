@@ -1,2 +1,2 @@
-docker load -i exchange2_amd64.tar
-docker run -p 40102:40102 --name exchange2 -d exchange2
+docker load -i exchange1_amd64.tar
+docker run -p 40101:40101 --name exchange1 -d exchange1
