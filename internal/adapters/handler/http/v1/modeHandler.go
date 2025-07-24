@@ -68,7 +68,6 @@ func (h *ExchangeHandler) SwitchToLiveExchange(w http.ResponseWriter, r *http.Re
 	w.Write([]byte(`{"status":"switched to live mode"}`))
 }
 
-// ✅ ИСПРАВЛЕНО: Реализуем GetCurrentExchange
 func (h *ExchangeHandler) GetCurrentExchange(w http.ResponseWriter, r *http.Request) {
 	// if h.exchangeService == nil {
 	// 	http.Error(w, "Exchange service not available", http.StatusServiceUnavailable)
@@ -78,17 +77,29 @@ func (h *ExchangeHandler) GetCurrentExchange(w http.ResponseWriter, r *http.Requ
 	// mode := h.exchangeService.GetCurrentMode()
 	// stats := h.exchangeService.GetStats()
 
+	// // Преобразуем adapter_names в строку для JSON
+	// adapterNames := ""
+	// if names, ok := stats["adapter_names"].([]string); ok {
+	// 	adapterNames = fmt.Sprintf("[%s]", strings.Join(names, ", "))
+	// }
+
 	// response := fmt.Sprintf(`{
 	// 	"current_mode": "%s",
 	// 	"is_running": %v,
 	// 	"active_adapters": %v,
 	// 	"healthy_adapters": %v,
+	// 	"adapter_names": %s,
+	// 	"aggregated_buffer": %v,
+	// 	"result_buffer": %v,
 	// 	"timestamp": "%s"
 	// }`,
 	// 	mode,
 	// 	stats["is_running"],
 	// 	stats["active_adapters"],
 	// 	stats["healthy_adapters"],
+	// 	adapterNames,
+	// 	stats["aggregated_buffer"],
+	// 	stats["result_buffer"],
 	// 	time.Now().Format(time.RFC3339),
 	// )
 
