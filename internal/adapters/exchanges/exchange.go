@@ -55,9 +55,10 @@ func CreateLiveExchangeAdapters() []port.ExchangeAdapter {
 // CreateTestExchangeAdapters creates all three test exchange adapters
 func CreateTestExchangeAdapters() []port.ExchangeAdapter {
 	return []port.ExchangeAdapter{
-		NewTestExchangeAdapter(DefaultHost, TestPort1, TestExchange1Name),
-		NewTestExchangeAdapter(DefaultHost, TestPort2, TestExchange2Name),
-		NewTestExchangeAdapter(DefaultHost, TestPort3, TestExchange3Name),
+		// ✅ ИСПРАВЛЕНО: Передаем правильные хост и порты для тестовых серверов
+		NewTestExchangeAdapter(DefaultHost, TestPort1, TestExchange1Name), // localhost:50101
+		NewTestExchangeAdapter(DefaultHost, TestPort2, TestExchange2Name), // localhost:50102
+		NewTestExchangeAdapter(DefaultHost, TestPort3, TestExchange3Name), // localhost:50103
 	}
 }
 

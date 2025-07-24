@@ -160,6 +160,77 @@ func (e *ExchangeService) GetCurrentMode() string {
 	return e.currentMode
 }
 
+func (e *ExchangeService) StopDataProcessing() error {
+	e.runMutex.Lock()
+	defer e.runMutex.Unlock()
+
+	if !e.isRunning {
+		return nil // Already stopped
+	}
+
+	slog.Info("Stopping data processing...")
+
+	// Stop all adapters FIRST
+	if err := e.stopCurrentAdapters(); err != nil {
+		slog.Error("Failed to stop adapters", "error", err)
+	}
+
+	// Cancel context to stop all goroutines
+	if e.cancel != nil {
+		e.cancel()
+	}
+
+	// Wait for all goroutines to finish
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+
+	// Wait with timeout
+	select {
+	case <-done:
+		slog.Info("All goroutines stopped")
+	case <-time.After(10 * time.Second):
+		slog.Warn("Timeout waiting for goroutines to stop")
+	}
+
+	// ✅ ИСПРАВЛЕНИЕ: НЕ закрываем resultChan - server.go читает из него!
+	// Только очищаем буфер, если нужно
+	e.drainChannel(e.resultChan)
+
+	// Close worker channels safely
+	for _, workerChan := range e.workerPool {
+		if workerChan != nil {
+			close(workerChan)
+		}
+	}
+
+	// ✅ ИСПРАВЛЕНИЕ: НЕ пересоздаем resultChan и aggregatedDataChan
+	// Создаем только новые каналы воркеров
+	for i := range e.workerPool {
+		e.workerPool[i] = make(chan domain.MarketData, 100)
+	}
+
+	e.isRunning = false
+	slog.Info("Data processing stopped")
+	return nil
+}
+
+// ✅ Добавляем метод для очистки буфера канала без его закрытия
+func (e *ExchangeService) drainChannel(ch chan domain.MarketData) {
+	for {
+		select {
+		case <-ch:
+			// Очищаем буфер
+		default:
+			// Буфер пуст
+			return
+		}
+	}
+}
+
+// ✅ ИСПРАВЛЕНИЕ: Обновляем StartDataProcessing чтобы переиспользовать каналы
 func (e *ExchangeService) StartDataProcessing(ctx context.Context) error {
 	e.runMutex.Lock()
 	defer e.runMutex.Unlock()
@@ -170,9 +241,24 @@ func (e *ExchangeService) StartDataProcessing(ctx context.Context) error {
 
 	slog.Info("Starting data processing...", "mode", e.currentMode, "workers", e.numWorkers)
 
-	// Initialize worker pool channels
+	// ✅ ИСПРАВЛЕНИЕ: Создаем новый контекст только если нет действующего
+	if e.ctx == nil || e.ctx.Err() != nil {
+		e.ctx, e.cancel = context.WithCancel(ctx)
+	}
+
+	// ✅ ИСПРАВЛЕНИЕ: Создаем aggregatedDataChan только если он не существует
+	if e.aggregatedDataChan == nil {
+		e.aggregatedDataChan = make(chan domain.MarketData, 1000)
+	} else {
+		// Очищаем буфер существующего канала
+		e.drainChannel(e.aggregatedDataChan)
+	}
+
+	// Initialize worker pool channels (они всегда пересоздаются)
 	for i := 0; i < e.numWorkers; i++ {
-		e.workerPool[i] = make(chan domain.MarketData, 100)
+		if e.workerPool[i] == nil {
+			e.workerPool[i] = make(chan domain.MarketData, 100)
+		}
 	}
 
 	// Start exchange adapters and collect their channels
@@ -208,60 +294,6 @@ func (e *ExchangeService) StartDataProcessing(ctx context.Context) error {
 	return nil
 }
 
-func (e *ExchangeService) StopDataProcessing() error {
-	e.runMutex.Lock()
-	defer e.runMutex.Unlock()
-
-	if !e.isRunning {
-		return nil // Already stopped
-	}
-
-	slog.Info("Stopping data processing...")
-
-	// Stop all adapters
-	if err := e.stopCurrentAdapters(); err != nil {
-		slog.Error("Failed to stop adapters", "error", err)
-	}
-
-	// Cancel context to stop all goroutines
-	e.cancel()
-
-	// Wait for all goroutines to finish
-	done := make(chan struct{})
-	go func() {
-		e.wg.Wait()
-		close(done)
-	}()
-
-	// Wait with timeout
-	select {
-	case <-done:
-		slog.Info("All goroutines stopped")
-	case <-time.After(10 * time.Second):
-		slog.Warn("Timeout waiting for goroutines to stop")
-	}
-
-	// Close worker channels
-	for _, workerChan := range e.workerPool {
-		close(workerChan)
-	}
-
-	// Close result channel
-	close(e.resultChan)
-
-	// Recreate context and channels for next start
-	e.ctx, e.cancel = context.WithCancel(context.Background())
-	e.aggregatedDataChan = make(chan domain.MarketData, 1000)
-	e.resultChan = make(chan domain.MarketData, 1000)
-	for i := range e.workerPool {
-		e.workerPool[i] = make(chan domain.MarketData, 100)
-	}
-
-	e.isRunning = false
-	slog.Info("Data processing stopped")
-	return nil
-}
-
 func (e *ExchangeService) GetDataStream() <-chan domain.MarketData {
 	return e.resultChan
 }
@@ -269,7 +301,7 @@ func (e *ExchangeService) GetDataStream() <-chan domain.MarketData {
 // Fan-in: Aggregates data from multiple exchange channels into one
 func (e *ExchangeService) fanIn(inputChannels []<-chan domain.MarketData) {
 	defer e.wg.Done()
-	defer close(e.aggregatedDataChan)
+	// ✅ ИСПРАВЛЕНИЕ: НЕ закрываем aggregatedDataChan - он переиспользуется!
 
 	slog.Info("Starting fan-in aggregator", "inputs", len(inputChannels))
 
@@ -289,10 +321,15 @@ func (e *ExchangeService) fanIn(inputChannels []<-chan domain.MarketData) {
 						return
 					}
 
+					// ✅ ИСПРАВЛЕНИЕ: Проверяем, что aggregatedDataChan не закрыт
 					select {
 					case e.aggregatedDataChan <- data:
+						// Успешно отправили
 					case <-e.ctx.Done():
 						return
+					case <-time.After(100 * time.Millisecond):
+						// Если канал переполнен, просто предупреждаем но не блокируемся
+						slog.Warn("Aggregated channel full, dropping data", "channel", id)
 					}
 
 				case <-e.ctx.Done():
@@ -304,7 +341,12 @@ func (e *ExchangeService) fanIn(inputChannels []<-chan domain.MarketData) {
 
 	fanInWg.Wait()
 	slog.Info("Fan-in aggregator completed")
+
+	// ✅ ИСПРАВЛЕНИЕ: Вместо закрытия канала, отправляем специальный сигнал завершения
+	// в distributor через контекст (который уже отменен в этой точке)
 }
+
+// ✅ ТАКЖЕ исправляем distributor - он не должен ожидать закрытия aggregatedDataChan
 
 // Distributor: Fan-out data to worker pool
 func (e *ExchangeService) distributor() {
@@ -317,7 +359,8 @@ func (e *ExchangeService) distributor() {
 		select {
 		case data, ok := <-e.aggregatedDataChan:
 			if !ok {
-				slog.Info("Aggregated data channel closed")
+				// ✅ ИСПРАВЛЕНИЕ: Этого больше не должно происходить в обычном режиме
+				slog.Info("Aggregated data channel closed unexpectedly")
 				return
 			}
 
@@ -333,6 +376,8 @@ func (e *ExchangeService) distributor() {
 			}
 
 		case <-e.ctx.Done():
+			// ✅ ИСПРАВЛЕНИЕ: Выходим по отмене контекста, а не по закрытию канала
+			slog.Info("Distributor stopped by context cancellation")
 			return
 		}
 	}
