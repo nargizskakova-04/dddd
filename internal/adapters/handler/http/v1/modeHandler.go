@@ -1,28 +1,32 @@
 package v1
 
 import (
+	"context"
 	"net/http"
 
 	"cryptomarket/internal/core/port"
 )
 
-type ModeHandler struct {
-	modeService port.ModeService
+type ExchangeHandler struct {
+	exchangeService port.ExchangeService
+	ctx             context.Context
 }
 
-func NewModeHandler(
-	modeService port.ModeService,
-) *ModeHandler {
-	return &ModeHandler{
-		modeService: modeService,
+func NewExchangeHandler(
+	exchangeService port.ExchangeService,
+) *ExchangeHandler {
+	return &ExchangeHandler{
+		exchangeService: exchangeService,
 	}
 }
 
-func (h *ModeHandler) SwitchToTestMode(w http.ResponseWriter, r *http.Request) {
+func (h *ExchangeHandler) SwitchToTestExchange(w http.ResponseWriter, r *http.Request) {
+	h.exchangeService.SwitchToTestMode(h.ctx)
 }
 
-func (h *ModeHandler) SwitchToLiveMode(w http.ResponseWriter, r *http.Request) {
+func (h *ExchangeHandler) SwitchToLiveExchange(w http.ResponseWriter, r *http.Request) {
+	h.exchangeService.SwitchToLiveMode(h.ctx)
 }
 
-func (h *ModeHandler) GetCurrentMode(w http.ResponseWriter, r *http.Request) {
+func (h *ExchangeHandler) GetCurrentExchange(w http.ResponseWriter, r *http.Request) {
 }
