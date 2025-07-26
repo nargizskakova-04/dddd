@@ -1,81 +1,102 @@
+// internal/core/service/exchange/switch_mode.go
 package exchange
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 )
 
+// SwitchToLiveMode switches to live mode (only affects reading from Redis)
 func (e *ExchangeService) SwitchToLiveMode(ctx context.Context) error {
 	e.modeMutex.Lock()
 	defer e.modeMutex.Unlock()
 
-	if e.currentMode == "live" {
+	if e.currentMode == ModeLive {
+		slog.Info("Already in live mode")
 		return nil // Already in live mode
 	}
 
-	slog.Info("Switching to live mode...")
+	previousMode := e.currentMode
+	e.currentMode = ModeLive
 
-	// Stop current adapters
-	if err := e.stopCurrentAdapters(); err != nil {
-		return fmt.Errorf("failed to stop current adapters: %w", err)
-	}
+	slog.Info("Switched to live mode", "previous_mode", previousMode, "current_mode", e.currentMode)
+	slog.Info("Live mode will filter data to exchanges: exchange1, exchange2, exchange3")
 
-	// Switch to live adapters
-	e.activeAdapters = e.liveAdapters
-	e.currentMode = "live"
-
-	// Restart data processing if it was running
-	e.runMutex.RLock()
-	wasRunning := e.isRunning
-	e.runMutex.RUnlock()
-
-	if wasRunning {
-		if err := e.StartDataProcessing(ctx); err != nil {
-			return fmt.Errorf("failed to restart data processing: %w", err)
-		}
-	}
-
-	slog.Info("Switched to live mode successfully")
 	return nil
 }
 
+// SwitchToTestMode switches to test mode (only affects reading from Redis)
 func (e *ExchangeService) SwitchToTestMode(ctx context.Context) error {
 	e.modeMutex.Lock()
 	defer e.modeMutex.Unlock()
 
-	if e.currentMode == "test" {
+	if e.currentMode == ModeTest {
+		slog.Info("Already in test mode")
 		return nil // Already in test mode
 	}
 
-	slog.Info("Switching to test mode...")
+	previousMode := e.currentMode
+	e.currentMode = ModeTest
 
-	// Stop current adapters
-	if err := e.stopCurrentAdapters(); err != nil {
-		return fmt.Errorf("failed to stop current adapters: %w", err)
-	}
+	slog.Info("Switched to test mode", "previous_mode", previousMode, "current_mode", e.currentMode)
+	slog.Info("Test mode will filter data to exchanges: test-exchange1, test-exchange2, test-exchange3")
 
-	// Switch to test adapters
-	e.activeAdapters = e.testAdapters
-	e.currentMode = "test"
-
-	// Restart data processing if it was running
-	e.runMutex.RLock()
-	wasRunning := e.isRunning
-	e.runMutex.RUnlock()
-
-	if wasRunning {
-		if err := e.StartDataProcessing(ctx); err != nil {
-			return fmt.Errorf("failed to restart data processing: %w", err)
-		}
-	}
-
-	slog.Info("Switched to test mode successfully")
 	return nil
 }
 
+// SwitchToAllMode switches to all mode (uses data from all exchanges)
+func (e *ExchangeService) SwitchToAllMode(ctx context.Context) error {
+	e.modeMutex.Lock()
+	defer e.modeMutex.Unlock()
+
+	if e.currentMode == ModeAll {
+		slog.Info("Already in all mode")
+		return nil // Already in all mode
+	}
+
+	previousMode := e.currentMode
+	e.currentMode = ModeAll
+
+	slog.Info("Switched to all mode", "previous_mode", previousMode, "current_mode", e.currentMode)
+	slog.Info("All mode will use data from all 6 exchanges")
+
+	return nil
+}
+
+// GetCurrentMode returns the current mode
 func (e *ExchangeService) GetCurrentMode() string {
 	e.modeMutex.RLock()
 	defer e.modeMutex.RUnlock()
 	return e.currentMode
+}
+
+// GetModeExchanges returns the list of exchange names that should be used for the current mode
+func (e *ExchangeService) GetModeExchanges() []string {
+	e.modeMutex.RLock()
+	defer e.modeMutex.RUnlock()
+
+	switch e.currentMode {
+	case ModeLive:
+		return []string{"exchange1", "exchange2", "exchange3"}
+	case ModeTest:
+		return []string{"test-exchange1", "test-exchange2", "test-exchange3"}
+	case ModeAll:
+		return []string{"exchange1", "exchange2", "exchange3", "test-exchange1", "test-exchange2", "test-exchange3"}
+	default:
+		// Default to live mode exchanges
+		return []string{"exchange1", "exchange2", "exchange3"}
+	}
+}
+
+// IsExchangeInCurrentMode checks if an exchange should be used in the current mode
+func (e *ExchangeService) IsExchangeInCurrentMode(exchangeName string) bool {
+	allowedExchanges := e.GetModeExchanges()
+
+	for _, allowed := range allowedExchanges {
+		if allowed == exchangeName {
+			return true
+		}
+	}
+
+	return false
 }

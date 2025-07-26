@@ -1,3 +1,4 @@
+// internal/adapters/handler/http/v1/endpoints.go
 package v1
 
 import "net/http"
@@ -38,9 +39,14 @@ func setPriceRoutes(handler *PriceHandler, router *http.ServeMux) {
 
 // setModeRoutes sets up data mode switching endpoints
 func setModeRoutes(handler *ExchangeHandler, router *http.ServeMux) {
+	// Mode switching endpoints
 	router.HandleFunc("POST /mode/test", handler.SwitchToTestMode)
 	router.HandleFunc("POST /mode/live", handler.SwitchToLiveMode)
-	router.HandleFunc("GET /mode/current", handler.GetCurrentMode) // Extra: get current mode
+	router.HandleFunc("POST /mode/all", handler.SwitchToAllMode) // NEW: All mode endpoint
+
+	// Mode information endpoints
+	router.HandleFunc("GET /mode/current", handler.GetCurrentMode) // Get current mode info
+	router.HandleFunc("GET /mode/stats", handler.GetServiceStats)  // NEW: Get service statistics
 }
 
 // setHealthRoutes sets up system health endpoints

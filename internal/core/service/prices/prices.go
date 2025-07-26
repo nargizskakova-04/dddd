@@ -1,3 +1,4 @@
+// internal/core/service/prices/prices.go
 package prices
 
 import (
@@ -29,18 +30,21 @@ var supportedExchanges = map[string]bool{
 }
 
 type PriceService struct {
-	cache port.Cache
-	db    *sql.DB
+	cache           port.Cache
+	db              *sql.DB
+	exchangeService port.ExchangeService // NEW: Added to get current mode
 }
 
-// NewPriceService creates a new price service with proper interface dependency
-func NewPriceService(cache port.Cache, db *sql.DB) port.PriceService {
+// NewPriceService creates a new price service with cache, database, and exchange service dependencies
+func NewPriceService(cache port.Cache, db *sql.DB, exchangeService port.ExchangeService) port.PriceService {
 	return &PriceService{
-		cache: cache,
-		db:    db,
+		cache:           cache,
+		db:              db,
+		exchangeService: exchangeService,
 	}
 }
 
+// GetLatestPrice now filters by current mode
 func (s *PriceService) GetLatestPrice(ctx context.Context, symbol string) (*domain.MarketData, error) {
 	// Validate symbol
 	validSymbol, err := s.validateSymbol(symbol)
@@ -48,9 +52,17 @@ func (s *PriceService) GetLatestPrice(ctx context.Context, symbol string) (*doma
 		return nil, err
 	}
 
-	// If cache is available, try to get from cache first
+	// If cache is available, try to get from cache with mode filtering
 	if s.cache != nil {
-		data, err := s.cache.GetLatestPrice(ctx, validSymbol)
+		// Get allowed exchanges for current mode
+		allowedExchanges := s.getAllowedExchanges()
+
+		if len(allowedExchanges) == 0 {
+			return nil, fmt.Errorf("no exchanges available for current mode")
+		}
+
+		// Use the new filtering method
+		data, err := s.cache.GetLatestPriceFromExchanges(ctx, validSymbol, allowedExchanges)
 		if err == nil && data != nil {
 			return data, nil
 		}
@@ -63,9 +75,10 @@ func (s *PriceService) GetLatestPrice(ctx context.Context, symbol string) (*doma
 		return nil, fmt.Errorf("no cache available and PostgreSQL fallback not implemented")
 	}
 
-	return nil, fmt.Errorf("no price data found for symbol %s", symbol)
+	return nil, fmt.Errorf("no price data found for symbol %s in current mode", symbol)
 }
 
+// GetLatestPriceByExchange validates exchange is allowed in current mode
 func (s *PriceService) GetLatestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
 	// Validate symbol and exchange
 	validSymbol, err := s.validateSymbol(symbol)
@@ -78,7 +91,13 @@ func (s *PriceService) GetLatestPriceByExchange(ctx context.Context, symbol, exc
 		return nil, err
 	}
 
-	// If cache is available, try to get from cache first
+	// Check if exchange is allowed in current mode
+	if !s.isExchangeAllowedInCurrentMode(validExchange) {
+		currentMode := s.getCurrentMode()
+		return nil, fmt.Errorf("exchange %s is not available in %s mode", exchange, currentMode)
+	}
+
+	// If cache is available, try to get from cache
 	if s.cache != nil {
 		data, err := s.cache.GetLatestPriceByExchange(ctx, validSymbol, validExchange)
 		if err == nil && data != nil {
@@ -96,7 +115,47 @@ func (s *PriceService) GetLatestPriceByExchange(ctx context.Context, symbol, exc
 	return nil, fmt.Errorf("no price data found for symbol %s on exchange %s", symbol, exchange)
 }
 
-// Simple validation functions
+// Helper methods for mode management
+
+// getAllowedExchanges returns the list of exchanges allowed in the current mode
+func (s *PriceService) getAllowedExchanges() []string {
+	if s.exchangeService == nil {
+		// Fallback to live mode exchanges if no exchange service
+		return []string{"exchange1", "exchange2", "exchange3"}
+	}
+
+	// Use interface method to get exchanges for current mode
+	// We need to add this method to the ExchangeService interface
+	if exchSvc, ok := s.exchangeService.(interface{ GetModeExchanges() []string }); ok {
+		return exchSvc.GetModeExchanges()
+	}
+
+	// Fallback to live mode
+	return []string{"exchange1", "exchange2", "exchange3"}
+}
+
+// getCurrentMode returns the current mode
+func (s *PriceService) getCurrentMode() string {
+	if s.exchangeService == nil {
+		return "live" // Default fallback
+	}
+	return s.exchangeService.GetCurrentMode()
+}
+
+// isExchangeAllowedInCurrentMode checks if an exchange is allowed in the current mode
+func (s *PriceService) isExchangeAllowedInCurrentMode(exchange string) bool {
+	allowedExchanges := s.getAllowedExchanges()
+
+	for _, allowed := range allowedExchanges {
+		if allowed == exchange {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Simple validation functions (unchanged)
 func (s *PriceService) validateSymbol(symbol string) (string, error) {
 	if symbol == "" {
 		return "", fmt.Errorf("symbol cannot be empty")
@@ -127,4 +186,15 @@ func (s *PriceService) validateExchange(exchange string) (string, error) {
 	}
 
 	return normalized, nil
+}
+
+// GetCurrentModeInfo returns information about the current mode and available exchanges
+func (s *PriceService) GetCurrentModeInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"current_mode":      s.getCurrentMode(),
+		"allowed_exchanges": s.getAllowedExchanges(),
+		"total_exchanges":   6,
+		"live_exchanges":    []string{"exchange1", "exchange2", "exchange3"},
+		"test_exchanges":    []string{"test-exchange1", "test-exchange2", "test-exchange3"},
+	}
 }

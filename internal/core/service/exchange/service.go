@@ -1,3 +1,4 @@
+// internal/core/service/exchange/service.go
 package exchange
 
 import (
@@ -12,17 +13,23 @@ import (
 	"cryptomarket/internal/core/port"
 )
 
-// ExchangeService implements the port.ExchangeService interface
-// and manages concurrency patterns for market data processing
+const (
+	ModeLive = "live"
+	ModeTest = "test"
+	ModeAll  = "all"
+)
+
+// ExchangeService now always processes data from all exchanges
+// Mode only affects which exchanges are considered when reading data
 type ExchangeService struct {
-	// Mode management
+	// Mode management - only affects reading, not data collection
 	currentMode string
 	modeMutex   sync.RWMutex
 
-	// Exchange adapters
-	liveAdapters   []port.ExchangeAdapter
-	testAdapters   []port.ExchangeAdapter
-	activeAdapters []port.ExchangeAdapter
+	// All exchange adapters - always active
+	liveAdapters []port.ExchangeAdapter
+	testAdapters []port.ExchangeAdapter
+	allAdapters  []port.ExchangeAdapter // Combined list for easy iteration
 
 	// Concurrency channels
 	aggregatedDataChan chan domain.MarketData   // Fan-in result
@@ -40,7 +47,7 @@ type ExchangeService struct {
 	numWorkers int
 }
 
-// NewExchangeService creates a new exchange service with default configuration
+// NewExchangeService creates a new exchange service that always processes all exchanges
 func NewExchangeService() port.ExchangeService {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -50,16 +57,21 @@ func NewExchangeService() port.ExchangeService {
 	// Create test adapters (generators)
 	testAdapters := exchanges.CreateTestExchangeAdapters()
 
-	numWorkers := 15 // 5 workers per exchange as specified in requirements
+	// Combine all adapters
+	allAdapters := make([]port.ExchangeAdapter, 0, len(liveAdapters)+len(testAdapters))
+	allAdapters = append(allAdapters, liveAdapters...)
+	allAdapters = append(allAdapters, testAdapters...)
+
+	numWorkers := 30 // Increased to handle all 6 exchanges (5 workers per exchange)
 
 	return &ExchangeService{
-		currentMode:        "live", // Default to live mode
+		currentMode:        ModeLive, // Default to live mode
 		liveAdapters:       liveAdapters,
 		testAdapters:       testAdapters,
-		activeAdapters:     liveAdapters, // Start with live adapters
-		aggregatedDataChan: make(chan domain.MarketData, 1000),
+		allAdapters:        allAdapters,
+		aggregatedDataChan: make(chan domain.MarketData, 2000), // Increased buffer for more data
 		workerPool:         make([]chan domain.MarketData, numWorkers),
-		resultChan:         make(chan domain.MarketData, 1000),
+		resultChan:         make(chan domain.MarketData, 2000), // Increased buffer
 		ctx:                ctx,
 		cancel:             cancel,
 		numWorkers:         numWorkers,
@@ -70,28 +82,159 @@ func NewExchangeService() port.ExchangeService {
 func NewExchangeServiceWithAdapters(liveAdapters, testAdapters []port.ExchangeAdapter) port.ExchangeService {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	numWorkers := 15 // 5 workers per exchange
+	// Combine all adapters
+	allAdapters := make([]port.ExchangeAdapter, 0, len(liveAdapters)+len(testAdapters))
+	allAdapters = append(allAdapters, liveAdapters...)
+	allAdapters = append(allAdapters, testAdapters...)
+
+	numWorkers := 30 // Handle all exchanges
 
 	return &ExchangeService{
-		currentMode:        "live", // Default to live mode
+		currentMode:        ModeLive, // Default to live mode
 		liveAdapters:       liveAdapters,
 		testAdapters:       testAdapters,
-		activeAdapters:     liveAdapters, // Start with live adapters
-		aggregatedDataChan: make(chan domain.MarketData, 1000),
+		allAdapters:        allAdapters,
+		aggregatedDataChan: make(chan domain.MarketData, 2000),
 		workerPool:         make([]chan domain.MarketData, numWorkers),
-		resultChan:         make(chan domain.MarketData, 1000),
+		resultChan:         make(chan domain.MarketData, 2000),
 		ctx:                ctx,
 		cancel:             cancel,
 		numWorkers:         numWorkers,
 	}
 }
 
-// Fan-in: Aggregates data from multiple exchange channels into one
+// StartDataProcessing now always starts ALL exchange adapters
+func (e *ExchangeService) StartDataProcessing(ctx context.Context) error {
+	e.runMutex.Lock()
+	defer e.runMutex.Unlock()
+
+	if e.isRunning {
+		return nil // Already running
+	}
+
+	slog.Info("Starting data processing for ALL exchanges...", "mode", e.currentMode, "workers", e.numWorkers, "total_exchanges", len(e.allAdapters))
+
+	// Initialize worker pool channels
+	for i := 0; i < e.numWorkers; i++ {
+		e.workerPool[i] = make(chan domain.MarketData, 100)
+	}
+
+	// Start ALL exchange adapters and collect their channels
+	var inputChannels []<-chan domain.MarketData
+	for _, adapter := range e.allAdapters {
+		dataChan, err := adapter.Start(e.ctx)
+		if err != nil {
+			slog.Error("Failed to start adapter", "adapter", adapter.Name(), "error", err)
+			continue
+		}
+		inputChannels = append(inputChannels, dataChan)
+		slog.Info("Started exchange adapter", "name", adapter.Name(), "healthy", adapter.IsHealthy())
+	}
+
+	if len(inputChannels) == 0 {
+		return fmt.Errorf("no exchange adapters started successfully")
+	}
+
+	// Start concurrency pipeline
+	e.wg.Add(1)
+	go e.fanIn(inputChannels)
+
+	e.wg.Add(1)
+	go e.distributor()
+
+	for i := 0; i < e.numWorkers; i++ {
+		e.wg.Add(1)
+		go e.worker(i, e.workerPool[i])
+	}
+
+	e.isRunning = true
+	slog.Info("Data processing started successfully", "exchanges", len(inputChannels), "workers", e.numWorkers)
+	return nil
+}
+
+// StopDataProcessing stops all adapters
+func (e *ExchangeService) StopDataProcessing() error {
+	e.runMutex.Lock()
+	defer e.runMutex.Unlock()
+
+	if !e.isRunning {
+		return nil // Already stopped
+	}
+
+	slog.Info("Stopping data processing...")
+
+	// Stop ALL adapters
+	if err := e.stopAllAdapters(); err != nil {
+		slog.Error("Failed to stop adapters", "error", err)
+	}
+
+	// Cancel context to stop all goroutines
+	e.cancel()
+
+	// Wait for all goroutines to finish
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+
+	// Wait with timeout
+	select {
+	case <-done:
+		slog.Info("All goroutines stopped")
+	case <-time.After(10 * time.Second):
+		slog.Warn("Timeout waiting for goroutines to stop")
+	}
+
+	// Close worker channels
+	for _, workerChan := range e.workerPool {
+		close(workerChan)
+	}
+
+	// Close result channel
+	close(e.resultChan)
+
+	// Recreate context and channels for next start
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.aggregatedDataChan = make(chan domain.MarketData, 2000)
+	e.resultChan = make(chan domain.MarketData, 2000)
+	for i := range e.workerPool {
+		e.workerPool[i] = make(chan domain.MarketData, 100)
+	}
+
+	e.isRunning = false
+	slog.Info("Data processing stopped")
+	return nil
+}
+
+// stopAllAdapters stops all adapters (both live and test)
+func (e *ExchangeService) stopAllAdapters() error {
+	var errors []error
+
+	for _, adapter := range e.allAdapters {
+		if err := adapter.Stop(); err != nil {
+			errors = append(errors, fmt.Errorf("failed to stop adapter %s: %w", adapter.Name(), err))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("multiple errors stopping adapters: %v", errors)
+	}
+
+	return nil
+}
+
+// GetDataStream returns the channel with all processed data
+func (e *ExchangeService) GetDataStream() <-chan domain.MarketData {
+	return e.resultChan
+}
+
+// Fan-in: Aggregates data from all exchange channels into one
 func (e *ExchangeService) fanIn(inputChannels []<-chan domain.MarketData) {
 	defer e.wg.Done()
 	defer close(e.aggregatedDataChan)
 
-	slog.Info("Starting fan-in aggregator", "inputs", len(inputChannels))
+	slog.Info("Starting fan-in aggregator for ALL exchanges", "inputs", len(inputChannels))
 
 	var fanInWg sync.WaitGroup
 
@@ -222,31 +365,19 @@ func (e *ExchangeService) processMarketData(data domain.MarketData) domain.Marke
 	return data
 }
 
-// stopCurrentAdapters stops all currently active adapters
-func (e *ExchangeService) stopCurrentAdapters() error {
-	var errors []error
-
-	for _, adapter := range e.activeAdapters {
-		if err := adapter.Stop(); err != nil {
-			errors = append(errors, fmt.Errorf("failed to stop adapter %s: %w", adapter.Name(), err))
-		}
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf("multiple errors stopping adapters: %v", errors)
-	}
-
-	return nil
+// GetAllAdapters returns all adapters (for monitoring)
+func (e *ExchangeService) GetAllAdapters() []port.ExchangeAdapter {
+	return e.allAdapters
 }
 
-// GetActiveAdapters returns the currently active adapters (for monitoring)
-func (e *ExchangeService) GetActiveAdapters() []port.ExchangeAdapter {
-	e.modeMutex.RLock()
-	defer e.modeMutex.RUnlock()
+// GetLiveAdapters returns live adapters
+func (e *ExchangeService) GetLiveAdapters() []port.ExchangeAdapter {
+	return e.liveAdapters
+}
 
-	result := make([]port.ExchangeAdapter, len(e.activeAdapters))
-	copy(result, e.activeAdapters)
-	return result
+// GetTestAdapters returns test adapters
+func (e *ExchangeService) GetTestAdapters() []port.ExchangeAdapter {
+	return e.testAdapters
 }
 
 // IsRunning returns whether data processing is currently running
@@ -264,7 +395,7 @@ func (e *ExchangeService) GetStats() map[string]interface{} {
 	defer e.runMutex.RUnlock()
 
 	healthyAdapters := 0
-	for _, adapter := range e.activeAdapters {
+	for _, adapter := range e.allAdapters {
 		if adapter.IsHealthy() {
 			healthyAdapters++
 		}
@@ -273,7 +404,9 @@ func (e *ExchangeService) GetStats() map[string]interface{} {
 	return map[string]interface{}{
 		"current_mode":      e.currentMode,
 		"is_running":        e.isRunning,
-		"active_adapters":   len(e.activeAdapters),
+		"total_adapters":    len(e.allAdapters),
+		"live_adapters":     len(e.liveAdapters),
+		"test_adapters":     len(e.testAdapters),
 		"healthy_adapters":  healthyAdapters,
 		"num_workers":       e.numWorkers,
 		"aggregated_buffer": len(e.aggregatedDataChan),
