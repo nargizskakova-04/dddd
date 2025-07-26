@@ -98,7 +98,7 @@ func (app *App) Initialize() error {
 	// 3. Create Handlers (adapters layer)
 	priceHandler := v1.NewPriceHandler(app.priceService)
 	healthHandler := v1.NewHealthHandler(nil) // TODO: implement health service
-	modeHandler := v1.NewModeHandler(nil)     // TODO: implement mode service
+	modeHandler := v1.NewExchangeHandler(nil) // TODO: implement mode service
 
 	// 4. Set up routes
 	v1.SetMarketRoutes(app.router, priceHandler, healthHandler, modeHandler)

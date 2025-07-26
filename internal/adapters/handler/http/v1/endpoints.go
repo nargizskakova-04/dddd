@@ -3,12 +3,12 @@ package v1
 import "net/http"
 
 // SetMarketRoutes sets up all market data API routes
-func SetMarketRoutes(router *http.ServeMux, marketHandler *PriceHandler, healthHandler *HealthHandler, modeHandler *ModeHandler) {
+func SetMarketRoutes(router *http.ServeMux, marketHandler *PriceHandler, healthHandler *HealthHandler, exchangeHandler *ExchangeHandler) {
 	// Market Data API Routes
 	setPriceRoutes(marketHandler, router)
 
 	// Data Mode API Routes
-	setModeRoutes(modeHandler, router)
+	setModeRoutes(exchangeHandler, router)
 
 	// System Health Routes
 	setHealthRoutes(healthHandler, router)
@@ -37,7 +37,7 @@ func setPriceRoutes(handler *PriceHandler, router *http.ServeMux) {
 }
 
 // setModeRoutes sets up data mode switching endpoints
-func setModeRoutes(handler *ModeHandler, router *http.ServeMux) {
+func setModeRoutes(handler *ExchangeHandler, router *http.ServeMux) {
 	router.HandleFunc("POST /mode/test", handler.SwitchToTestMode)
 	router.HandleFunc("POST /mode/live", handler.SwitchToLiveMode)
 	router.HandleFunc("GET /mode/current", handler.GetCurrentMode) // Extra: get current mode
