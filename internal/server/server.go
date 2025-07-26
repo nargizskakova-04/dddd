@@ -190,7 +190,7 @@ func (app *App) processMarketData(dataStream <-chan domain.MarketData) {
 
 // startCleanupRoutine cleans up old data from Redis
 func (app *App) startCleanupRoutine() {
-	ticker := time.NewTicker(30 * time.Second) // Clean up every 30 seconds
+	ticker := time.NewTicker(60 * time.Second) // Clean up every 30 seconds
 	defer ticker.Stop()
 
 	cacheAdapter := cache.NewRedisAdapter(app.redisClient).(*cache.RedisAdapter)
