@@ -1,4 +1,4 @@
-// internal/server/server.go - Updated initialization with proper dependencies
+// internal/server/server.go - Updated with aggregation service
 package server
 
 import (
@@ -15,6 +15,7 @@ import (
 	"cryptomarket/internal/config"
 	"cryptomarket/internal/core/domain"
 	"cryptomarket/internal/core/port"
+	"cryptomarket/internal/core/service/aggregation"
 	"cryptomarket/internal/core/service/exchange"
 	"cryptomarket/internal/core/service/prices"
 
@@ -30,8 +31,9 @@ type App struct {
 	redisClient *redis.Client
 
 	// Services
-	exchangeService port.ExchangeService
-	priceService    port.PriceService
+	exchangeService    port.ExchangeService
+	priceService       port.PriceService
+	aggregationService *aggregation.AggregationService
 
 	// For graceful shutdown
 	ctx    context.Context
@@ -98,17 +100,37 @@ func (app *App) Initialize() error {
 	app.priceService = prices.NewPriceService(cacheAdapter, app.db, app.exchangeService)
 	slog.Info("Price service created with mode awareness")
 
-	// 3. Create Handlers (adapters layer)
+	// 3. NEW: Create Aggregation Service for Redis -> PostgreSQL data aggregation
+	if cacheAdapter != nil && app.db != nil {
+		pricesRepo := postgres.NewPricesRepository(app.db)
+		app.aggregationService = aggregation.NewAggregationService(cacheAdapter, pricesRepo)
+		slog.Info("Aggregation service created successfully")
+	} else {
+		slog.Warn("Aggregation service not created - missing cache or database")
+	}
+
+	// 4. Create Handlers (adapters layer)
 	priceHandler := v1.NewPriceHandler(app.priceService)
 	healthHandler := v1.NewHealthHandler(nil) // TODO: implement health service
 	modeHandler := v1.NewExchangeHandler(app.exchangeService)
 
-	// 4. Set up routes
-	v1.SetMarketRoutes(app.router, priceHandler, healthHandler, modeHandler)
+	// NEW: Create aggregation handler
+	var aggregationHandler *v1.AggregationHandler
+	if app.aggregationService != nil {
+		aggregationHandler = v1.NewAggregationHandler(app.aggregationService)
+	}
+
+	// 5. Set up routes
+	v1.SetMarketRoutes(app.router, priceHandler, healthHandler, modeHandler, aggregationHandler)
 	slog.Info("HTTP routes configured")
 
-	// 5. Start background data processing for ALL exchanges
+	// 6. Start background data processing for ALL exchanges
 	go app.startMarketDataProcessor()
+
+	// 7. NEW: Start background aggregation service
+	if app.aggregationService != nil {
+		go app.startAggregationService()
+	}
 
 	slog.Info("Application initialized successfully")
 	slog.Info("System will collect data from ALL 6 exchanges but serve data based on current mode",
@@ -129,7 +151,10 @@ func (app *App) Run() {
 		"mode_info", "GET /mode/current",
 		"service_stats", "GET /mode/stats",
 		"price_latest", "GET /prices/latest/{symbol}",
-		"price_by_exchange", "GET /prices/latest/{exchange}/{symbol}")
+		"price_by_exchange", "GET /prices/latest/{exchange}/{symbol}",
+		"aggregation_status", "GET /aggregation/status",
+		"aggregation_health", "GET /aggregation/health",
+		"trigger_aggregation", "POST /aggregation/trigger")
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("Server error", "error", err)
@@ -167,6 +192,23 @@ func (app *App) startMarketDataProcessor() {
 	slog.Info("System is now collecting and storing data from all 6 exchanges")
 }
 
+// NEW: Start the aggregation service for Redis -> PostgreSQL data aggregation
+func (app *App) startAggregationService() {
+	slog.Info("Starting Redis -> PostgreSQL aggregation service...")
+
+	if app.aggregationService == nil {
+		slog.Error("Aggregation service is not available")
+		return
+	}
+
+	// Check health status before starting
+	healthStatus := app.aggregationService.GetHealthStatus(app.ctx)
+	slog.Info("Aggregation service health check", "status", healthStatus)
+
+	// Start periodic aggregation (runs every minute)
+	app.aggregationService.PerformPeriodicAggregation(app.ctx)
+}
+
 // processMarketData handles incoming market data from ALL exchanges and stores it in cache
 func (app *App) processMarketData(dataStream <-chan domain.MarketData) {
 	slog.Info("Starting market data processing goroutine for ALL exchanges...")
@@ -197,9 +239,6 @@ func (app *App) processMarketData(dataStream <-chan domain.MarketData) {
 				}
 				cancel()
 			}
-
-			// TODO: Implement batching and PostgreSQL storage
-			// This should batch data and store aggregated statistics every minute
 
 		case <-app.ctx.Done():
 			slog.Info("Market data processing stopped")
@@ -246,7 +285,7 @@ func (app *App) startCleanupRoutine() {
 func (app *App) Shutdown() error {
 	slog.Info("Shutting down application...")
 
-	// Cancel context to stop all goroutines
+	// Cancel context to stop all goroutines (including aggregation service)
 	app.cancel()
 
 	// Stop exchange service

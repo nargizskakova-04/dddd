@@ -4,7 +4,7 @@ package v1
 import "net/http"
 
 // SetMarketRoutes sets up all market data API routes
-func SetMarketRoutes(router *http.ServeMux, marketHandler *PriceHandler, healthHandler *HealthHandler, exchangeHandler *ExchangeHandler) {
+func SetMarketRoutes(router *http.ServeMux, marketHandler *PriceHandler, healthHandler *HealthHandler, exchangeHandler *ExchangeHandler, aggregationHandler *AggregationHandler) {
 	// Market Data API Routes
 	setPriceRoutes(marketHandler, router)
 
@@ -13,6 +13,9 @@ func SetMarketRoutes(router *http.ServeMux, marketHandler *PriceHandler, healthH
 
 	// System Health Routes
 	setHealthRoutes(healthHandler, router)
+
+	// NEW: Aggregation Routes
+	setAggregationRoutes(aggregationHandler, router)
 }
 
 // setPriceRoutes sets up all price-related endpoints
@@ -53,4 +56,19 @@ func setModeRoutes(handler *ExchangeHandler, router *http.ServeMux) {
 func setHealthRoutes(handler *HealthHandler, router *http.ServeMux) {
 	router.HandleFunc("GET /health", handler.GetSystemHealth)
 	router.HandleFunc("GET /health/detailed", handler.GetDetailedHealth) // Extra: detailed health check
+}
+
+// NEW: setAggregationRoutes sets up aggregation service endpoints
+func setAggregationRoutes(handler *AggregationHandler, router *http.ServeMux) {
+	// Only set up routes if handler is available
+	if handler == nil {
+		return
+	}
+
+	// Aggregation status and health
+	router.HandleFunc("GET /aggregation/status", handler.GetAggregationStatus)
+	router.HandleFunc("GET /aggregation/health", handler.GetAggregationHealth)
+
+	// Manual aggregation trigger
+	router.HandleFunc("POST /aggregation/trigger", handler.TriggerManualAggregation)
 }

@@ -1,4 +1,4 @@
-// internal/adapters/cache/redis.go - Updated methods and new filtering methods
+// internal/adapters/cache/redis.go - FIXED VERSION with millisecond timestamp support
 package cache
 
 import (
@@ -40,10 +40,18 @@ func (r *RedisAdapter) SetPrice(ctx context.Context, key string, data domain.Mar
 
 	// Store in time-series sorted set for range queries
 	timeSeriesKey := fmt.Sprintf("timeseries:%s:%s", data.Symbol, data.Exchange)
-	score := float64(data.Timestamp)
+
+	// FIXED: Convert timestamp to milliseconds if it's in seconds
+	var score float64
+	if data.Timestamp > 1000000000000 { // Already in milliseconds
+		score = float64(data.Timestamp)
+	} else { // Convert seconds to milliseconds
+		score = float64(data.Timestamp * 1000)
+	}
+
 	member := fmt.Sprintf("%f", data.Price)
 
-	// Add to sorted set with score as timestamp
+	// Add to sorted set with score as timestamp (in milliseconds)
 	if err := r.client.ZAdd(ctx, timeSeriesKey, redis.Z{
 		Score:  score,
 		Member: member,
@@ -117,7 +125,7 @@ func (r *RedisAdapter) GetLatestPriceByExchange(ctx context.Context, symbol, exc
 	return &data, nil
 }
 
-// NEW: GetLatestPriceFromExchanges retrieves latest price from a filtered list of exchanges
+// GetLatestPriceFromExchanges retrieves latest price from a filtered list of exchanges
 func (r *RedisAdapter) GetLatestPriceFromExchanges(ctx context.Context, symbol string, exchanges []string) (*domain.MarketData, error) {
 	if len(exchanges) == 0 {
 		return nil, fmt.Errorf("no exchanges specified")
@@ -153,7 +161,7 @@ func (r *RedisAdapter) GetLatestPriceFromExchanges(ctx context.Context, symbol s
 	return latestData, nil
 }
 
-// GetPricesInRange retrieves all prices for a symbol within time range across all exchanges (unchanged)
+// FIXED: GetPricesInRange now properly handles millisecond timestamps
 func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from, to time.Time) ([]domain.MarketData, error) {
 	// Get all exchanges for this symbol
 	pattern := fmt.Sprintf("timeseries:%s:*", symbol)
@@ -163,8 +171,10 @@ func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from
 	}
 
 	var allData []domain.MarketData
-	fromScore := float64(from.Unix())
-	toScore := float64(to.Unix())
+
+	// FIXED: Convert time range to milliseconds
+	fromScore := float64(from.UnixMilli())
+	toScore := float64(to.UnixMilli())
 
 	for _, key := range keys {
 		// Extract exchange name from key
@@ -197,10 +207,18 @@ func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from
 				continue
 			}
 
+			// FIXED: Handle both second and millisecond timestamps
+			timestamp := int64(scores)
+			if timestamp > 1000000000000 { // Already in milliseconds
+				timestamp = timestamp
+			} else { // Convert seconds to milliseconds for consistency
+				timestamp = timestamp * 1000
+			}
+
 			data := domain.MarketData{
 				Symbol:    symbol,
 				Price:     price,
-				Timestamp: int64(scores),
+				Timestamp: timestamp,
 				Exchange:  exchange,
 			}
 			allData = append(allData, data)
@@ -210,11 +228,15 @@ func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from
 	return allData, nil
 }
 
-// GetPricesInRangeByExchange retrieves prices for a symbol from specific exchange within time range (unchanged)
+// FIXED: GetPricesInRangeByExchange now properly handles millisecond timestamps
 func (r *RedisAdapter) GetPricesInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.MarketData, error) {
 	key := fmt.Sprintf("timeseries:%s:%s", symbol, exchange)
-	fromScore := float64(from.Unix())
-	toScore := float64(to.Unix())
+
+	// FIXED: Convert time range to milliseconds
+	fromScore := float64(from.UnixMilli())
+	toScore := float64(to.UnixMilli())
+
+	fmt.Printf("DEBUG: Querying Redis key=%s, fromScore=%.0f, toScore=%.0f\n", key, fromScore, toScore)
 
 	results, err := r.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
 		Min: strconv.FormatFloat(fromScore, 'f', -1, 64),
@@ -223,6 +245,8 @@ func (r *RedisAdapter) GetPricesInRangeByExchange(ctx context.Context, symbol, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get prices in range: %w", err)
 	}
+
+	fmt.Printf("DEBUG: Found %d results for %s/%s\n", len(results), symbol, exchange)
 
 	var data []domain.MarketData
 	for _, result := range results {
@@ -237,10 +261,18 @@ func (r *RedisAdapter) GetPricesInRangeByExchange(ctx context.Context, symbol, e
 			continue
 		}
 
+		// FIXED: Handle both second and millisecond timestamps
+		timestamp := int64(scores)
+		if timestamp > 1000000000000 { // Already in milliseconds
+			timestamp = timestamp
+		} else { // Convert seconds to milliseconds for consistency
+			timestamp = timestamp * 1000
+		}
+
 		marketData := domain.MarketData{
 			Symbol:    symbol,
 			Price:     price,
-			Timestamp: int64(scores),
+			Timestamp: timestamp,
 			Exchange:  exchange,
 		}
 		data = append(data, marketData)
@@ -249,15 +281,17 @@ func (r *RedisAdapter) GetPricesInRangeByExchange(ctx context.Context, symbol, e
 	return data, nil
 }
 
-// NEW: GetPricesInRangeFromExchanges retrieves prices from filtered exchanges within time range
+// GetPricesInRangeFromExchanges retrieves prices from filtered exchanges within time range
 func (r *RedisAdapter) GetPricesInRangeFromExchanges(ctx context.Context, symbol string, exchanges []string, from, to time.Time) ([]domain.MarketData, error) {
 	if len(exchanges) == 0 {
 		return nil, fmt.Errorf("no exchanges specified")
 	}
 
 	var allData []domain.MarketData
-	fromScore := float64(from.Unix())
-	toScore := float64(to.Unix())
+
+	// FIXED: Convert time range to milliseconds
+	fromScore := float64(from.UnixMilli())
+	toScore := float64(to.UnixMilli())
 
 	// Check each specified exchange
 	for _, exchange := range exchanges {
@@ -284,10 +318,18 @@ func (r *RedisAdapter) GetPricesInRangeFromExchanges(ctx context.Context, symbol
 				continue
 			}
 
+			// FIXED: Handle both second and millisecond timestamps
+			timestamp := int64(scores)
+			if timestamp > 1000000000000 { // Already in milliseconds
+				timestamp = timestamp
+			} else { // Convert seconds to milliseconds for consistency
+				timestamp = timestamp * 1000
+			}
+
 			data := domain.MarketData{
 				Symbol:    symbol,
 				Price:     price,
-				Timestamp: int64(scores),
+				Timestamp: timestamp,
 				Exchange:  exchange,
 			}
 			allData = append(allData, data)
@@ -297,10 +339,12 @@ func (r *RedisAdapter) GetPricesInRangeFromExchanges(ctx context.Context, symbol
 	return allData, nil
 }
 
-// CleanupOldData removes data older than specified duration (unchanged)
+// CleanupOldData removes data older than specified duration (updated for milliseconds)
 func (r *RedisAdapter) CleanupOldData(ctx context.Context, olderThan time.Duration) error {
 	cutoffTime := time.Now().Add(-olderThan)
-	cutoffScore := float64(cutoffTime.Unix())
+
+	// FIXED: Convert to milliseconds
+	cutoffScore := float64(cutoffTime.UnixMilli())
 
 	// Clean up time series data
 	timeSeriesPattern := "timeseries:*"
@@ -333,7 +377,15 @@ func (r *RedisAdapter) CleanupOldData(ctx context.Context, olderThan time.Durati
 				continue
 			}
 
-			if time.Unix(data.Timestamp, 0).Before(cutoffTime) {
+			// FIXED: Handle millisecond timestamps for cleanup
+			var dataTime time.Time
+			if data.Timestamp > 1000000000000 { // Milliseconds
+				dataTime = time.UnixMilli(data.Timestamp)
+			} else { // Seconds
+				dataTime = time.Unix(data.Timestamp, 0)
+			}
+
+			if dataTime.Before(cutoffTime) {
 				r.client.Del(ctx, key)
 			}
 		}
