@@ -145,8 +145,6 @@ func (s *AggregationService) aggregateForSymbolExchange(ctx context.Context, sym
 
 	return aggregatedPrice, nil
 }
-
-// calculateAggregations calculates average, min, and max prices from market data
 func (s *AggregationService) calculateAggregations(data []domain.MarketData, symbol, exchange string, aggregationTime time.Time) *domain.Prices {
 	if len(data) == 0 {
 		return nil
@@ -171,7 +169,7 @@ func (s *AggregationService) calculateAggregations(data []domain.MarketData, sym
 	return &domain.Prices{
 		PairName:     symbol,
 		Exchange:     exchange,
-		Timestamp:    aggregationTime,
+		Timestamp:    aggregationTime.UnixMilli(), // CHANGED: Convert to milliseconds
 		AveragePrice: averagePrice,
 		MinPrice:     minPrice,
 		MaxPrice:     maxPrice,

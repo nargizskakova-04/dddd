@@ -19,18 +19,19 @@ func NewPricesRepository(db *sql.DB) *PricesRepository {
 		db: db,
 	}
 }
-
-// InsertAggregatedPrice inserts aggregated price data into PostgreSQL
 func (r *PricesRepository) InsertAggregatedPrice(ctx context.Context, aggregatedPrice domain.Prices) error {
 	query := `
-		INSERT INTO prices (pair_name, exchange, timestamp, average_price, min_price, max_price)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
+        INSERT INTO prices (pair_name, exchange, timestamp, average_price, min_price, max_price)
+        VALUES ($1, $2, $3, $4, $5, $6)
+    `
+
+	// CHANGED: Convert milliseconds to time.Time for PostgreSQL
+	timestamp := time.UnixMilli(aggregatedPrice.Timestamp)
 
 	_, err := r.db.ExecContext(ctx, query,
 		aggregatedPrice.PairName,
 		aggregatedPrice.Exchange,
-		aggregatedPrice.Timestamp,
+		timestamp, // Convert to time.Time for database
 		aggregatedPrice.AveragePrice,
 		aggregatedPrice.MinPrice,
 		aggregatedPrice.MaxPrice,
@@ -42,8 +43,6 @@ func (r *PricesRepository) InsertAggregatedPrice(ctx context.Context, aggregated
 
 	return nil
 }
-
-// InsertAggregatedPrices inserts multiple aggregated price records in a batch
 func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregatedPrices []domain.Prices) error {
 	if len(aggregatedPrices) == 0 {
 		return nil
@@ -58,9 +57,9 @@ func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregate
 
 	// Prepare statement
 	query := `
-		INSERT INTO prices (pair_name, exchange, timestamp, average_price, min_price, max_price)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
+        INSERT INTO prices (pair_name, exchange, timestamp, average_price, min_price, max_price)
+        VALUES ($1, $2, $3, $4, $5, $6)
+    `
 
 	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
@@ -70,10 +69,13 @@ func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregate
 
 	// Execute for each record
 	for _, price := range aggregatedPrices {
+		// CHANGED: Convert milliseconds to time.Time for PostgreSQL
+		timestamp := time.UnixMilli(price.Timestamp)
+
 		_, err := stmt.ExecContext(ctx,
 			price.PairName,
 			price.Exchange,
-			price.Timestamp,
+			timestamp, // Convert to time.Time for database
 			price.AveragePrice,
 			price.MinPrice,
 			price.MaxPrice,
