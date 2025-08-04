@@ -35,7 +35,8 @@ type App struct {
 	priceService       port.PriceService
 	aggregationService *aggregation.AggregationService
 
-	priceRepo port.PriceRepository
+	// CHANGE: Use the correct interface type
+	priceRepo port.PriceRepository // Changed from port.PriceRepository
 
 	// For graceful shutdown
 	ctx    context.Context
@@ -97,6 +98,9 @@ func (app *App) Initialize() error {
 	// 1. Create Exchange Service (handles data collection from ALL exchanges)
 	app.exchangeService = exchange.NewExchangeService()
 	slog.Info("Exchange service created", "default_mode", app.exchangeService.GetCurrentMode())
+
+	pricesRepo := postgres.NewPricesRepository(app.db)
+	app.priceRepo = pricesRepo
 
 	// 2. Create Price Service (business logic layer) - now with exchange service dependency
 	app.priceService = prices.NewPriceService(cacheAdapter, app.db, app.exchangeService, app.priceRepo)

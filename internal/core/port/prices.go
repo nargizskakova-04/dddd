@@ -1,3 +1,5 @@
+// Update internal/core/port/prices.go
+
 package port
 
 import (
@@ -7,25 +9,18 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
+// REMOVE the old PriceRepository interface and replace with this:
 type PriceRepository interface {
-	GetLatestPrice(symbol string) (domain.GetPrice, error)
-	GetLatestPriceByExchange(symbol string, exchange string) (domain.GetPrice, error)
+	// Existing aggregation methods
+	InsertAggregatedPrice(ctx context.Context, aggregatedPrice domain.Prices) error
+	InsertAggregatedPrices(ctx context.Context, aggregatedPrices []domain.Prices) error
+	GetLatestAggregationTime(ctx context.Context) (time.Time, error)
+	GetAggregatedPricesInRange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.Prices, error)
+	HealthCheck(ctx context.Context) error
 
-	GetHighestPrice(symbol string) (domain.GetPrice, error)
-	GetHighestPriceExchange(symbol string, exchange string) (domain.GetPrice, error)
-	GetHighestPriceInDuration(symbol string, from time.Time, to time.Time) (domain.GetPrice, error)
-	GetHighestPriceInDurationExchange(symbol string, exchange string, from time.Time, to time.Time) (domain.GetPrice, error)
+	// NEW: Methods for highest prices from last 30 records
 	GetHighestPriceFromLast30Records(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
 	GetHighestPriceByExchangeFromLast30Records(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
-
-	GetLowestPrice(symbol string) (domain.GetPrice, error)
-	GetLowestPriceExchange(symbol string, exchange string) (domain.GetPrice, error)
-	GetLowestPriceInDuration(symbol string, from time.Time, to time.Time) (domain.GetPrice, error)
-	GetLowestPriceInDurationExchange(symbol string, exchange string, from time.Time, to time.Time) (domain.GetPrice, error)
-
-	GetAveragePrice(symbol string) (domain.GetPrice, error)
-	GetAveragePriceExchange(symbol string, exchange string) (domain.GetPrice, error)
-	GetAveragePriceInDurationExchange(symbol string, exchange string, from time.Time, to time.Time) (domain.GetPrice, error)
 }
 
 type PriceService interface {
