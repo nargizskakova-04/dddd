@@ -33,7 +33,7 @@ func (r *PricesRepository) GetHighestPriceFromLast30Records(ctx context.Context,
 			FROM prices
 			WHERE pair_name = $1 AND exchange IN (%s)
 			ORDER BY timestamp DESC
-			LIMIT 30
+			LIMIT 3
 		)
 		SELECT pair_name, exchange, timestamp, max_price
 		FROM latest_records
@@ -49,7 +49,7 @@ func (r *PricesRepository) GetHighestPriceFromLast30Records(ctx context.Context,
 			FROM prices
 			WHERE pair_name = $1 AND exchange IN (%s)
 			ORDER BY timestamp DESC
-			LIMIT 30
+			LIMIT 3
 		)
 		SELECT pair_name, exchange, timestamp, max_price
 		FROM latest_records
@@ -90,7 +90,7 @@ func (r *PricesRepository) GetHighestPriceByExchangeFromLast30Records(ctx contex
 			FROM prices
 			WHERE pair_name = $1 AND exchange = $2
 			ORDER BY timestamp DESC
-			LIMIT 30
+			LIMIT 1
 		)
 		SELECT pair_name, exchange, timestamp, max_price
 		FROM latest_records
