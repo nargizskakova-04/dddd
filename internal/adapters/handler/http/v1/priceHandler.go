@@ -130,9 +130,91 @@ func (h *PriceHandler) GetLatestPriceByExchange(w http.ResponseWriter, r *http.R
 }
 
 func (h *PriceHandler) GetHighestPrice(w http.ResponseWriter, r *http.Request) {
+	// Extract symbol from URL path
+	symbol := r.PathValue("symbol")
+	if symbol == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "missing symbol parameter")
+		return
+	}
+
+	// Normalize symbol to uppercase
+	symbol = strings.ToUpper(symbol)
+
+	// Validate symbol
+	if !supportedSymbols[symbol] {
+		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
+		return
+	}
+
+	// Call service to get highest price
+	marketData, err := h.priceService.GetHighestPrice(r.Context(), symbol)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
+		return
+	}
+
+	if marketData == nil {
+		h.writeErrorResponse(w, http.StatusNotFound, "no price data found for symbol: "+symbol)
+		return
+	}
+
+	// Prepare response
+	response := LatestPriceResponse{
+		Symbol:    marketData.Symbol,
+		Price:     marketData.Price,
+		Timestamp: marketData.Timestamp,
+		Exchange:  marketData.Exchange,
+	}
+
+	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
+// GetHighestPriceByExchange handles GET /api/v1/prices/{exchange}/{symbol}/highest
 func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.Request) {
+	// Extract exchange and symbol from URL path
+	exchange := r.PathValue("exchange")
+	symbol := r.PathValue("symbol")
+
+	if exchange == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "missing exchange parameter")
+		return
+	}
+
+	if symbol == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "missing symbol parameter")
+		return
+	}
+
+	// Normalize symbol to uppercase
+	symbol = strings.ToUpper(symbol)
+
+	// Validate symbol
+	if !supportedSymbols[symbol] {
+		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
+		return
+	}
+
+	// Call service to get highest price by exchange
+	marketData, err := h.priceService.GetHighestPriceByExchange(r.Context(), symbol, exchange)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
+		return
+	}
+
+	if marketData == nil {
+		h.writeErrorResponse(w, http.StatusNotFound, "no price data found for symbol: "+symbol+" on exchange: "+exchange)
+		return
+	}
+
+	// Prepare response
+	response := LatestPriceResponse{
+		Symbol:    marketData.Symbol,
+		Price:     marketData.Price,
+		Timestamp: marketData.Timestamp,
+		Exchange:  marketData.Exchange,
+	}
+
+	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
 func (h *PriceHandler) GetLowestPrice(w http.ResponseWriter, r *http.Request) {

@@ -33,14 +33,16 @@ type PriceService struct {
 	cache           port.Cache
 	db              *sql.DB
 	exchangeService port.ExchangeService // NEW: Added to get current mode
+	pricesRepo      port.PriceRepository
 }
 
 // NewPriceService creates a new price service with cache, database, and exchange service dependencies
-func NewPriceService(cache port.Cache, db *sql.DB, exchangeService port.ExchangeService) port.PriceService {
+func NewPriceService(cache port.Cache, db *sql.DB, exchangeService port.ExchangeService, pricesRepo port.PriceRepository) port.PriceService {
 	return &PriceService{
 		cache:           cache,
 		db:              db,
 		exchangeService: exchangeService,
+		pricesRepo:      pricesRepo,
 	}
 }
 
@@ -197,4 +199,83 @@ func (s *PriceService) GetCurrentModeInfo() map[string]interface{} {
 		"live_exchanges":    []string{"exchange1", "exchange2", "exchange3"},
 		"test_exchanges":    []string{"test-exchange1", "test-exchange2", "test-exchange3"},
 	}
+}
+
+// GetHighestPrice returns the highest price for a symbol from last 30 records, filtered by current mode
+func (s *PriceService) GetHighestPrice(ctx context.Context, symbol string) (*domain.MarketData, error) {
+	// Validate symbol
+	validSymbol, err := s.validateSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get allowed exchanges for current mode
+	allowedExchanges := s.getAllowedExchanges()
+	if len(allowedExchanges) == 0 {
+		return nil, fmt.Errorf("no exchanges available for current mode")
+	}
+
+	// Try cache first if available
+	if s.cache != nil {
+		// Try to get from cache - you might want to implement cache methods for highest prices
+		// For now, we'll skip cache and go directly to database
+	}
+
+	// Get from database
+	if s.pricesRepo == nil {
+		return nil, fmt.Errorf("prices repository not available")
+	}
+
+	data, err := s.pricesRepo.GetHighestPriceFromLast30Records(ctx, validSymbol, allowedExchanges)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get highest price from database: %w", err)
+	}
+
+	if data == nil {
+		return nil, fmt.Errorf("no price data found for symbol %s in current mode", validSymbol)
+	}
+
+	return data, nil
+}
+
+// GetHighestPriceByExchange returns the highest price for a symbol and specific exchange from last 30 records
+func (s *PriceService) GetHighestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
+	// Validate symbol and exchange
+	validSymbol, err := s.validateSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+
+	validExchange, err := s.validateExchange(exchange)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if exchange is allowed in current mode
+	if !s.isExchangeAllowedInCurrentMode(validExchange) {
+		currentMode := s.getCurrentMode()
+		return nil, fmt.Errorf("exchange %s is not available in %s mode", exchange, currentMode)
+	}
+
+	// Try cache first if available
+	if s.cache != nil {
+		// Try to get from cache - you might want to implement cache methods for highest prices
+		// For now, we'll skip cache and go directly to database
+	}
+
+	// Get from database
+	if s.pricesRepo == nil {
+		return nil, fmt.Errorf("prices repository not available")
+	}
+
+	data, err := s.pricesRepo.GetHighestPriceByExchangeFromLast30Records(ctx, validSymbol, validExchange)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get highest price by exchange from database: %w", err)
+	}
+
+	if data == nil {
+		return nil, fmt.Errorf("no price data found for symbol %s on exchange %s", validSymbol, validExchange)
+	}
+
+	return data, nil
 }

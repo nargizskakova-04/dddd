@@ -35,6 +35,8 @@ type App struct {
 	priceService       port.PriceService
 	aggregationService *aggregation.AggregationService
 
+	priceRepo port.PriceRepository
+
 	// For graceful shutdown
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -97,7 +99,7 @@ func (app *App) Initialize() error {
 	slog.Info("Exchange service created", "default_mode", app.exchangeService.GetCurrentMode())
 
 	// 2. Create Price Service (business logic layer) - now with exchange service dependency
-	app.priceService = prices.NewPriceService(cacheAdapter, app.db, app.exchangeService)
+	app.priceService = prices.NewPriceService(cacheAdapter, app.db, app.exchangeService, app.priceRepo)
 	slog.Info("Price service created with mode awareness")
 
 	// 3. NEW: Create Aggregation Service for Redis -> PostgreSQL data aggregation
