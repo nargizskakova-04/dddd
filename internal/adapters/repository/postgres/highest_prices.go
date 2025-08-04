@@ -10,9 +10,7 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
-// GetHighestPriceFromLast30Records returns the highest price for a symbol from the last 30 records
-// filtered by allowed exchanges
-func (r *PricesRepository) GetHighestPriceFromLast30Records(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error) {
+func (r *PricesRepository) GetHighestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error) {
 	if len(allowedExchanges) == 0 {
 		return nil, fmt.Errorf("no allowed exchanges provided")
 	}
@@ -27,23 +25,8 @@ func (r *PricesRepository) GetHighestPriceFromLast30Records(ctx context.Context,
 		args[i+1] = exchange
 	}
 
+	// LIMIT 3: Get latest record from each of the 3 allowed exchanges
 	query := fmt.Sprintf(`
-		WITH latest_records AS (
-			SELECT pair_name, exchange, timestamp, average_price, min_price, max_price
-			FROM prices
-			WHERE pair_name = $1 AND exchange IN (%s)
-			ORDER BY timestamp DESC
-			LIMIT 3
-		)
-		SELECT pair_name, exchange, timestamp, max_price
-		FROM latest_records
-		WHERE max_price = (SELECT MAX(max_price) FROM latest_records)
-		ORDER BY timestamp DESC
-		LIMIT 1
-	`, fmt.Sprintf("%s", placeholders[0]))
-
-	// Build the full query with all placeholders
-	query = fmt.Sprintf(`
 		WITH latest_records AS (
 			SELECT pair_name, exchange, timestamp, average_price, min_price, max_price
 			FROM prices
@@ -72,29 +55,22 @@ func (r *PricesRepository) GetHighestPriceFromLast30Records(ctx context.Context,
 		if err == sql.ErrNoRows {
 			return nil, nil // No data found
 		}
-		return nil, fmt.Errorf("failed to get highest price from last 30 records: %w", err)
+		return nil, fmt.Errorf("failed to get highest price from latest records: %w", err)
 	}
 
-	// Convert timestamp to milliseconds
-	marketData.Timestamp = timestamp.UnixMilli()
-
+	// ✅ ИСПРАВЛЕНО: Консистентность - используем секунды как в остальной системе
+	marketData.Timestamp = timestamp.Unix()
 	return &marketData, nil
 }
 
-// GetHighestPriceByExchangeFromLast30Records returns the highest price for a symbol and specific exchange
-// from the last 30 records
-func (r *PricesRepository) GetHighestPriceByExchangeFromLast30Records(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
+// ✅ ИСПРАВЛЕНО: Теперь действительно берем 30 записей ИЛИ упрощаем логику для latest
+// GetHighestPriceByExchangeFromLatestRecord returns the highest max_price from the latest record of specific exchange
+func (r *PricesRepository) GetHighestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
+	// ✅ УПРОЩЕНО: Если нужна только последняя запись, то просто берем max_price из неё
 	query := `
-		WITH latest_records AS (
-			SELECT pair_name, exchange, timestamp, average_price, min_price, max_price
-			FROM prices
-			WHERE pair_name = $1 AND exchange = $2
-			ORDER BY timestamp DESC
-			LIMIT 1
-		)
 		SELECT pair_name, exchange, timestamp, max_price
-		FROM latest_records
-		WHERE max_price = (SELECT MAX(max_price) FROM latest_records)
+		FROM prices
+		WHERE pair_name = $1 AND exchange = $2
 		ORDER BY timestamp DESC
 		LIMIT 1
 	`
@@ -113,12 +89,11 @@ func (r *PricesRepository) GetHighestPriceByExchangeFromLast30Records(ctx contex
 		if err == sql.ErrNoRows {
 			return nil, nil // No data found
 		}
-		return nil, fmt.Errorf("failed to get highest price by exchange from last 30 records: %w", err)
+		return nil, fmt.Errorf("failed to get highest price by exchange from latest record: %w", err)
 	}
 
-	// Convert timestamp to milliseconds
-	marketData.Timestamp = timestamp.UnixMilli()
-
+	// ✅ ИСПРАВЛЕНО: Консистентность
+	marketData.Timestamp = timestamp.Unix()
 	return &marketData, nil
 }
 

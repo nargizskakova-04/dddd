@@ -226,7 +226,7 @@ func (s *PriceService) GetHighestPrice(ctx context.Context, symbol string) (*dom
 		return nil, fmt.Errorf("prices repository not available")
 	}
 
-	data, err := s.pricesRepo.GetHighestPriceFromLast30Records(ctx, validSymbol, allowedExchanges)
+	data, err := s.pricesRepo.GetHighestPriceFromLatestRecords(ctx, validSymbol, allowedExchanges)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get highest price from database: %w", err)
 	}
@@ -268,7 +268,7 @@ func (s *PriceService) GetHighestPriceByExchange(ctx context.Context, symbol, ex
 		return nil, fmt.Errorf("prices repository not available")
 	}
 
-	data, err := s.pricesRepo.GetHighestPriceByExchangeFromLast30Records(ctx, validSymbol, validExchange)
+	data, err := s.pricesRepo.GetHighestPriceByExchangeFromLatestRecord(ctx, validSymbol, validExchange)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get highest price by exchange from database: %w", err)
 	}

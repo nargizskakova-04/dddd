@@ -19,8 +19,8 @@ type PriceRepository interface {
 	HealthCheck(ctx context.Context) error
 
 	// NEW: Methods for highest prices from last 30 records
-	GetHighestPriceFromLast30Records(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
-	GetHighestPriceByExchangeFromLast30Records(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+	GetHighestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
+	GetHighestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 }
 
 type PriceService interface {
