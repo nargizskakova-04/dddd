@@ -32,6 +32,11 @@ type PriceRepository interface {
 	// NEW: Lowest price methods with time range support
 	GetLowestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error)
 	GetLowestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
+
+	GetAveragePriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error)
+	GetAveragePriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
+	GetAveragePriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
+	GetAveragePriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 }
 
 // PriceService interface - ADD these new methods to the existing interface
@@ -43,12 +48,18 @@ type PriceService interface {
 	GetHighestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 	GetLowestPrice(ctx context.Context, symbol string) (*domain.MarketData, error)
 	GetLowestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+	GetAveragePrice(ctx context.Context, symbol string) (*domain.MarketData, error)
+	GetAveragePriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 
 	// NEW: Period-based highest price methods
 	GetHighestPriceWithPeriod(ctx context.Context, symbol, period string) (*domain.MarketData, error)
 	GetHighestPriceByExchangeWithPeriod(ctx context.Context, symbol, exchange, period string) (*domain.MarketData, error)
-	GetPeriodInfo(period string) (map[string]interface{}, error)
 
 	GetLowestPriceWithPeriod(ctx context.Context, symbol, period string) (*domain.MarketData, error)
 	GetLowestPriceByExchangeWithPeriod(ctx context.Context, symbol, exchange, period string) (*domain.MarketData, error)
+
+	GetAveragePriceByExchangeWithPeriod(ctx context.Context, symbol, exchange, periodStr string) (*domain.MarketData, error)
+	GetAveragePriceWithPeriod(ctx context.Context, symbol, periodStr string) (*domain.MarketData, error)
+
+	GetPeriodInfo(period string) (map[string]interface{}, error)
 }
