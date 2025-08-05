@@ -26,6 +26,9 @@ type PriceRepository interface {
 	GetHighestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error)
 	GetHighestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
 	GetPriceDataStats(ctx context.Context, symbol string, exchanges []string) (map[string]interface{}, error)
+
+	GetLowestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
+	GetLowestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 }
 
 // PriceService interface - ADD these new methods to the existing interface
@@ -35,9 +38,14 @@ type PriceService interface {
 	GetLatestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 	GetHighestPrice(ctx context.Context, symbol string) (*domain.MarketData, error)
 	GetHighestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+	GetLowestPrice(ctx context.Context, symbol string) (*domain.MarketData, error)
+	GetLowestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 
 	// NEW: Period-based highest price methods
 	GetHighestPriceWithPeriod(ctx context.Context, symbol, period string) (*domain.MarketData, error)
 	GetHighestPriceByExchangeWithPeriod(ctx context.Context, symbol, exchange, period string) (*domain.MarketData, error)
 	GetPeriodInfo(period string) (map[string]interface{}, error)
+
+	GetLowestPriceWithPeriod(ctx context.Context, symbol, period string) (*domain.MarketData, error)
+	GetLowestPriceByExchangeWithPeriod(ctx context.Context, symbol, exchange, period string) (*domain.MarketData, error)
 }
