@@ -1,4 +1,3 @@
-// internal/adapters/cache/average_price.go
 package cache
 
 import (
@@ -23,10 +22,9 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 		"to", to.Format(time.RFC3339),
 		"duration", to.Sub(from))
 
-	var averagePrice *domain.MarketData
-	var avgPrice float64
+	var allPrices []domain.MarketData
 
-	// Check each specified exchange
+	// Collect prices from all specified exchanges
 	for _, exchange := range exchanges {
 		prices, err := r.GetPricesInRangeByExchange(ctx, symbol, exchange, from, to)
 		if err != nil {
@@ -44,38 +42,31 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 			continue
 		}
 
-		// Find average price in this exchange's data
-		for _, price := range prices {
-			if averagePrice == nil || price.Price > avgPrice {
-				avgPrice = price.Price
-				averagePrice = &domain.MarketData{
-					Symbol:    price.Symbol,
-					Price:     price.Price,
-					Timestamp: price.Timestamp,
-					Exchange:  price.Exchange,
-				}
-			}
-		}
+		// Add all prices from this exchange
+		allPrices = append(allPrices, prices...)
 
 		slog.Debug("Processed exchange data",
 			"exchange", exchange,
-			"data_points", len(prices),
-			"exchange_avg_price", getAvgPriceFromData(prices))
+			"data_points", len(prices))
 	}
 
-	if averagePrice == nil {
+	if len(allPrices) == 0 {
 		slog.Debug("No price data found in cache for any exchange",
 			"symbol", symbol,
 			"exchanges", exchanges)
 		return nil, fmt.Errorf("no price data found for symbol %s from exchanges %v in time range", symbol, exchanges)
 	}
 
+	// Calculate the actual average price
+	averagePrice := calculateAveragePrice(allPrices)
+
 	slog.Info("Found average price in cache",
 		"symbol", symbol,
 		"price", averagePrice.Price,
 		"exchange", averagePrice.Exchange,
 		"timestamp", time.UnixMilli(averagePrice.Timestamp).Format(time.RFC3339),
-		"data_points_checked", "multiple_exchanges")
+		"data_points_checked", len(allPrices),
+		"exchanges_checked", len(exchanges))
 
 	return averagePrice, nil
 }
@@ -101,16 +92,8 @@ func (r *RedisAdapter) GetAveragePriceInRangeByExchange(ctx context.Context, sym
 		return nil, fmt.Errorf("no price data found for symbol %s from exchange %s in time range", symbol, exchange)
 	}
 
-	// Find the average price
-	averagePrice := &prices[0]
-	avgPrice := prices[0].Price
-
-	for i := 1; i < len(prices); i++ {
-		if prices[i].Price > avgPrice {
-			avgPrice = prices[i].Price
-			averagePrice = &prices[i]
-		}
-	}
+	// Calculate the actual average price
+	averagePrice := calculateAveragePrice(prices)
 
 	slog.Info("Found average price in cache for exchange",
 		"symbol", symbol,
@@ -122,17 +105,46 @@ func (r *RedisAdapter) GetAveragePriceInRangeByExchange(ctx context.Context, sym
 	return averagePrice, nil
 }
 
-// Helper function to get avg price from a slice of MarketData
+// FIXED: Helper function to calculate the actual average price from a slice of MarketData
+func calculateAveragePrice(prices []domain.MarketData) *domain.MarketData {
+	if len(prices) == 0 {
+		return nil
+	}
+
+	var sum float64
+	var latestTimestamp int64
+	var latestExchange string
+
+	// Calculate sum and find the most recent data point for metadata
+	for _, price := range prices {
+		sum += price.Price
+		if price.Timestamp > latestTimestamp {
+			latestTimestamp = price.Timestamp
+			latestExchange = price.Exchange
+		}
+	}
+
+	// Calculate actual average
+	averagePrice := sum / float64(len(prices))
+
+	return &domain.MarketData{
+		Symbol:    prices[0].Symbol, // All prices should have the same symbol
+		Price:     averagePrice,     // FIXED: Now using actual average
+		Timestamp: latestTimestamp,  // Use timestamp from most recent data point
+		Exchange:  latestExchange,   // Use exchange from most recent data point
+	}
+}
+
+// FIXED: Helper function to get average price from a slice of MarketData (for logging)
 func getAvgPriceFromData(prices []domain.MarketData) float64 {
 	if len(prices) == 0 {
 		return 0
 	}
 
-	avgPrice := prices[0].Price
-	for _, price := range prices[1:] {
-		if price.Price > avgPrice {
-			avgPrice = price.Price
-		}
+	var sum float64
+	for _, price := range prices {
+		sum += price.Price
 	}
-	return avgPrice
+
+	return sum / float64(len(prices)) // FIXED: Now returns actual average
 }

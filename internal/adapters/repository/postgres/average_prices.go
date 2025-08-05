@@ -1,4 +1,3 @@
-// internal/adapters/repository/postgres/average_prices.go
 package postgres
 
 import (
@@ -25,30 +24,33 @@ func (r *PricesRepository) GetAveragePriceFromLatestRecords(ctx context.Context,
 		args[i+1] = exchange
 	}
 
-	// LIMIT 3: Get latest record from each of the 3 allowed exchanges
+	// FIXED: Get latest record from each allowed exchange and calculate average
 	query := fmt.Sprintf(`
 		WITH latest_records AS (
-			SELECT pair_name, exchange, timestamp, average_price, min_price, max_price
+			SELECT DISTINCT ON (exchange) 
+				pair_name, exchange, timestamp, average_price, min_price, max_price
 			FROM prices
 			WHERE pair_name = $1 AND exchange IN (%s)
-			ORDER BY timestamp DESC
-			LIMIT 3
+			ORDER BY exchange, timestamp DESC
 		)
-		SELECT pair_name, exchange, timestamp, average_price
+		SELECT 
+			pair_name,
+			'multiple' as exchange,  -- Indicate this is from multiple exchanges
+			MAX(timestamp) as timestamp,  -- Use most recent timestamp
+			AVG(average_price) as calculated_average  -- Calculate actual average
 		FROM latest_records
-		WHERE average_price = (SELECT AVG(average_price) FROM latest_records)
-		ORDER BY timestamp DESC
-		LIMIT 1
+		GROUP BY pair_name
 	`, joinPlaceholders(placeholders))
 
 	var marketData domain.MarketData
 	var timestamp time.Time
+	var avgPrice float64
 
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(
 		&marketData.Symbol,
 		&marketData.Exchange,
 		&timestamp,
-		&marketData.Price,
+		&avgPrice,
 	)
 
 	if err != nil {
@@ -58,15 +60,16 @@ func (r *PricesRepository) GetAveragePriceFromLatestRecords(ctx context.Context,
 		return nil, fmt.Errorf("failed to get average price from latest records: %w", err)
 	}
 
-	// ✅ ИСПРАВЛЕНО: Консистентность - используем секунды как в остальной системе
+	// FIXED: Use the calculated average price
+	marketData.Price = avgPrice
 	marketData.Timestamp = timestamp.Unix()
+
 	return &marketData, nil
 }
 
-// ✅ ИСПРАВЛЕНО: Теперь действительно берем 30 записей ИЛИ упрощаем логику для latest
-// GetAveragePriceByExchangeFromLatestRecord returns the average average_price from the latest record of specific exchange
+// FIXED: GetAveragePriceByExchangeFromLatestRecord - simplified to just return the average_price from latest record
 func (r *PricesRepository) GetAveragePriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
-	// ✅ УПРОЩЕНО: Если нужна только последняя запись, то просто берем average_price из неё
+	// FIXED: Simply get the average_price from the latest record for this exchange
 	query := `
 		SELECT pair_name, exchange, timestamp, average_price
 		FROM prices
@@ -92,7 +95,7 @@ func (r *PricesRepository) GetAveragePriceByExchangeFromLatestRecord(ctx context
 		return nil, fmt.Errorf("failed to get average price by exchange from latest record: %w", err)
 	}
 
-	// ✅ ИСПРАВЛЕНО: Консистентность
+	// FIXED: Consistency - use Unix seconds
 	marketData.Timestamp = timestamp.Unix()
 	return &marketData, nil
 }

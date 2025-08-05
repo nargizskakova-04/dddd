@@ -496,16 +496,16 @@ func (h *PriceHandler) GetAveragePriceByExchange(w http.ResponseWriter, r *http.
 
 	if period != "" {
 		// Use period-based method
-		marketData, err = h.priceService.GetHighestPriceByExchangeWithPeriod(r.Context(), symbol, exchange, period)
+		marketData, err = h.priceService.GetAveragePriceByExchangeWithPeriod(r.Context(), symbol, exchange, period)
 		if err != nil {
-			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price by exchange with period: "+err.Error())
+			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get average price by exchange with period: "+err.Error())
 			return
 		}
 	} else {
-		// Use default method (last 30 records)
-		marketData, err = h.priceService.GetHighestPriceByExchange(r.Context(), symbol, exchange)
+		// FIXED: Use correct method - GetAveragePriceByExchange instead of GetHighestPriceByExchange
+		marketData, err = h.priceService.GetAveragePriceByExchange(r.Context(), symbol, exchange)
 		if err != nil {
-			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price by exchange: "+err.Error())
+			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get average price by exchange: "+err.Error())
 			return
 		}
 	}

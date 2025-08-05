@@ -19,6 +19,7 @@ func NewHealthHandler(
 }
 
 func (h *HealthHandler) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
+
 }
 
 func (h *HealthHandler) GetDetailedHealth(w http.ResponseWriter, r *http.Request) {
