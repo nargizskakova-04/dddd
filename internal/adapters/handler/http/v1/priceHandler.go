@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"cryptomarket/internal/core/domain"
 	"cryptomarket/internal/core/port"
 )
 
@@ -146,15 +147,34 @@ func (h *PriceHandler) GetHighestPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Call service to get highest price
-	marketData, err := h.priceService.GetHighestPrice(r.Context(), symbol)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
-		return
+	// Get period parameter from query string
+	period := r.URL.Query().Get("period")
+
+	var marketData *domain.MarketData
+	var err error
+
+	if period != "" {
+		// Use period-based method
+		marketData, err = h.priceService.GetHighestPriceWithPeriod(r.Context(), symbol, period)
+		if err != nil {
+			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price with period: "+err.Error())
+			return
+		}
+	} else {
+		// Use default method (last 30 records)
+		marketData, err = h.priceService.GetHighestPrice(r.Context(), symbol)
+		if err != nil {
+			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
+			return
+		}
 	}
 
 	if marketData == nil {
-		h.writeErrorResponse(w, http.StatusNotFound, "no price data found for symbol: "+symbol)
+		message := "no price data found for symbol: " + symbol
+		if period != "" {
+			message += " in the last " + period
+		}
+		h.writeErrorResponse(w, http.StatusNotFound, message)
 		return
 	}
 
@@ -169,7 +189,7 @@ func (h *PriceHandler) GetHighestPrice(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// GetHighestPriceByExchange handles GET /api/v1/prices/{exchange}/{symbol}/highest
+// GetHighestPriceByExchange handles GET /prices/highest/{exchange}/{symbol}?period={duration}
 func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.Request) {
 	// Extract exchange and symbol from URL path
 	exchange := r.PathValue("exchange")
@@ -194,15 +214,34 @@ func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Call service to get highest price by exchange
-	marketData, err := h.priceService.GetHighestPriceByExchange(r.Context(), symbol, exchange)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
-		return
+	// Get period parameter from query string
+	period := r.URL.Query().Get("period")
+
+	var marketData *domain.MarketData
+	var err error
+
+	if period != "" {
+		// Use period-based method
+		marketData, err = h.priceService.GetHighestPriceByExchangeWithPeriod(r.Context(), symbol, exchange, period)
+		if err != nil {
+			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price by exchange with period: "+err.Error())
+			return
+		}
+	} else {
+		// Use default method (last 30 records)
+		marketData, err = h.priceService.GetHighestPriceByExchange(r.Context(), symbol, exchange)
+		if err != nil {
+			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price by exchange: "+err.Error())
+			return
+		}
 	}
 
 	if marketData == nil {
-		h.writeErrorResponse(w, http.StatusNotFound, "no price data found for symbol: "+symbol+" on exchange: "+exchange)
+		message := "no price data found for symbol: " + symbol + " on exchange: " + exchange
+		if period != "" {
+			message += " in the last " + period
+		}
+		h.writeErrorResponse(w, http.StatusNotFound, message)
 		return
 	}
 
@@ -215,6 +254,30 @@ func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.
 	}
 
 	h.writeJSONResponse(w, http.StatusOK, response)
+}
+
+// NEW: GetPeriodInfo handles GET /prices/period-info?period={duration} for debugging
+func (h *PriceHandler) GetPeriodInfo(w http.ResponseWriter, r *http.Request) {
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "missing period parameter")
+		return
+	}
+
+	// Check if the service supports period info
+	if svc, ok := h.priceService.(interface {
+		GetPeriodInfo(string) (map[string]interface{}, error)
+	}); ok {
+		info, err := svc.GetPeriodInfo(period)
+		if err != nil {
+			h.writeErrorResponse(w, http.StatusBadRequest, "invalid period: "+err.Error())
+			return
+		}
+
+		h.writeJSONResponse(w, http.StatusOK, info)
+	} else {
+		h.writeErrorResponse(w, http.StatusNotImplemented, "period info not supported by this service implementation")
+	}
 }
 
 func (h *PriceHandler) GetLowestPrice(w http.ResponseWriter, r *http.Request) {

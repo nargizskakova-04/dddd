@@ -1,4 +1,4 @@
-// Update internal/core/port/prices.go
+// Update internal/core/port/prices.go - ADD these methods to existing interfaces
 
 package port
 
@@ -9,7 +9,7 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
-// REMOVE the old PriceRepository interface and replace with this:
+// PriceRepository interface - ADD these new methods to the existing interface
 type PriceRepository interface {
 	// Existing aggregation methods
 	InsertAggregatedPrice(ctx context.Context, aggregatedPrice domain.Prices) error
@@ -18,19 +18,26 @@ type PriceRepository interface {
 	GetAggregatedPricesInRange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.Prices, error)
 	HealthCheck(ctx context.Context) error
 
-	// NEW: Methods for highest prices from last 30 records
+	// Existing highest price methods
 	GetHighestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
 	GetHighestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+
+	// NEW: Highest price methods with time range support
+	GetHighestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error)
+	GetHighestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
+	GetPriceDataStats(ctx context.Context, symbol string, exchanges []string) (map[string]interface{}, error)
 }
 
+// PriceService interface - ADD these new methods to the existing interface
 type PriceService interface {
-	// Get the latest price for a symbol across all exchanges
+	// Existing methods
 	GetLatestPrice(ctx context.Context, symbol string) (*domain.MarketData, error)
-
-	// Get the latest price for a symbol from a specific exchange
 	GetLatestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
-
-	// New highest price methods
 	GetHighestPrice(ctx context.Context, symbol string) (*domain.MarketData, error)
 	GetHighestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+
+	// NEW: Period-based highest price methods
+	GetHighestPriceWithPeriod(ctx context.Context, symbol, period string) (*domain.MarketData, error)
+	GetHighestPriceByExchangeWithPeriod(ctx context.Context, symbol, exchange, period string) (*domain.MarketData, error)
+	GetPeriodInfo(period string) (map[string]interface{}, error)
 }

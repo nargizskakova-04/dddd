@@ -8,31 +8,21 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
+// Update internal/core/port/cache.go - ADD these methods to the existing Cache interface
 type Cache interface {
-	// Store price data with timestamp
+	// Existing methods
 	SetPrice(ctx context.Context, key string, data domain.MarketData) error
-
-	// Get latest price for a symbol (searches all exchanges)
 	GetLatestPrice(ctx context.Context, symbol string) (*domain.MarketData, error)
-
-	// Get latest price for a symbol from specific exchange
 	GetLatestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
-
-	// NEW: Get latest price for a symbol from a filtered list of exchanges
 	GetLatestPriceFromExchanges(ctx context.Context, symbol string, exchanges []string) (*domain.MarketData, error)
-
-	// Get all prices for a symbol within time range
 	GetPricesInRange(ctx context.Context, symbol string, from, to time.Time) ([]domain.MarketData, error)
-
-	// Get all prices for a symbol from specific exchange within time range
 	GetPricesInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.MarketData, error)
-
-	// NEW: Get prices for a symbol from filtered exchanges within time range
 	GetPricesInRangeFromExchanges(ctx context.Context, symbol string, exchanges []string, from, to time.Time) ([]domain.MarketData, error)
-
-	// Clean up old data (older than specified duration)
 	CleanupOldData(ctx context.Context, olderThan time.Duration) error
-
-	// Health check
 	Ping(ctx context.Context) error
+
+	// NEW: Highest price methods with time range support
+	GetHighestPriceInRange(ctx context.Context, symbol string, exchanges []string, from, to time.Time) (*domain.MarketData, error)
+	GetHighestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
+	GetLatestPricesCount(ctx context.Context, symbol, exchange string, count int) ([]domain.MarketData, error)
 }
