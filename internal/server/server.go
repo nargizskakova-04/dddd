@@ -17,6 +17,7 @@ import (
 	"cryptomarket/internal/core/port"
 	"cryptomarket/internal/core/service/aggregation"
 	"cryptomarket/internal/core/service/exchange"
+	"cryptomarket/internal/core/service/health"
 	"cryptomarket/internal/core/service/prices"
 
 	"github.com/redis/go-redis/v9"
@@ -34,6 +35,7 @@ type App struct {
 	exchangeService    port.ExchangeService
 	priceService       port.PriceService
 	aggregationService *aggregation.AggregationService
+	healthService      port.HealthService
 
 	// CHANGE: Use the correct interface type
 	priceRepo port.PriceRepository // Changed from port.PriceRepository
@@ -115,9 +117,12 @@ func (app *App) Initialize() error {
 		slog.Warn("Aggregation service not created - missing cache or database")
 	}
 
+	healthRepo := postgres.NewHealthRepository(app.db)
+	app.healthService = health.NewHealthService(healthRepo, cacheAdapter, app.exchangeService, app.aggregationService)
+
 	// 4. Create Handlers (adapters layer)
 	priceHandler := v1.NewPriceHandler(app.priceService)
-	healthHandler := v1.NewHealthHandler(nil) // TODO: implement health service
+	healthHandler := v1.NewHealthHandler(app.healthService) // TODO: implement health service
 	modeHandler := v1.NewExchangeHandler(app.exchangeService)
 
 	// NEW: Create aggregation handler
