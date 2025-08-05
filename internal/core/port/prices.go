@@ -18,17 +18,20 @@ type PriceRepository interface {
 	GetAggregatedPricesInRange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.Prices, error)
 	HealthCheck(ctx context.Context) error
 
-	// Existing highest price methods
+	// Existing highest/lowest price methods (latest records)
 	GetHighestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
 	GetHighestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+	GetLowestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
+	GetLowestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
 
-	// NEW: Highest price methods with time range support
+	// Highest price methods with time range support
 	GetHighestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error)
 	GetHighestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
 	GetPriceDataStats(ctx context.Context, symbol string, exchanges []string) (map[string]interface{}, error)
 
-	GetLowestPriceFromLatestRecords(ctx context.Context, symbol string, allowedExchanges []string) (*domain.MarketData, error)
-	GetLowestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error)
+	// NEW: Lowest price methods with time range support
+	GetLowestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error)
+	GetLowestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
 }
 
 // PriceService interface - ADD these new methods to the existing interface

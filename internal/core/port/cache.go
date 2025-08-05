@@ -25,4 +25,8 @@ type Cache interface {
 	GetHighestPriceInRange(ctx context.Context, symbol string, exchanges []string, from, to time.Time) (*domain.MarketData, error)
 	GetHighestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
 	GetLatestPricesCount(ctx context.Context, symbol, exchange string, count int) ([]domain.MarketData, error)
+
+	// NEW: Lowest price methods with time range support
+	GetLowestPriceInRange(ctx context.Context, symbol string, exchanges []string, from, to time.Time) (*domain.MarketData, error)
+	GetLowestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
 }

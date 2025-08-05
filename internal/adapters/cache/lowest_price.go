@@ -24,7 +24,7 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 		"duration", to.Sub(from))
 
 	var lowestPrice *domain.MarketData
-	var maxPrice float64
+	var minPrice float64 // FIXED: Changed from maxPrice to minPrice
 
 	// Check each specified exchange
 	for _, exchange := range exchanges {
@@ -46,8 +46,9 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 
 		// Find lowest price in this exchange's data
 		for _, price := range prices {
-			if lowestPrice == nil || price.Price > maxPrice {
-				maxPrice = price.Price
+			// FIXED: Proper lowest price logic
+			if lowestPrice == nil || price.Price < minPrice {
+				minPrice = price.Price
 				lowestPrice = &domain.MarketData{
 					Symbol:    price.Symbol,
 					Price:     price.Price,
@@ -60,7 +61,7 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 		slog.Debug("Processed exchange data",
 			"exchange", exchange,
 			"data_points", len(prices),
-			"exchange_max_price", getMaxPriceFromData(prices))
+			"exchange_min_price", getMinPriceFromData(prices)) // FIXED: Changed function name
 	}
 
 	if lowestPrice == nil {
@@ -103,11 +104,12 @@ func (r *RedisAdapter) GetLowestPriceInRangeByExchange(ctx context.Context, symb
 
 	// Find the lowest price
 	lowestPrice := &prices[0]
-	maxPrice := prices[0].Price
+	minPrice := prices[0].Price // FIXED: Changed from maxPrice to minPrice
 
 	for i := 1; i < len(prices); i++ {
-		if prices[i].Price > maxPrice {
-			maxPrice = prices[i].Price
+		// FIXED: Proper lowest price comparison
+		if prices[i].Price < minPrice {
+			minPrice = prices[i].Price
 			lowestPrice = &prices[i]
 		}
 	}
@@ -120,4 +122,19 @@ func (r *RedisAdapter) GetLowestPriceInRangeByExchange(ctx context.Context, symb
 		"data_points_checked", len(prices))
 
 	return lowestPrice, nil
+}
+
+// FIXED: Helper function to get min price from a slice of MarketData
+func getMinPriceFromData(prices []domain.MarketData) float64 {
+	if len(prices) == 0 {
+		return 0
+	}
+
+	minPrice := prices[0].Price
+	for _, price := range prices[1:] {
+		if price.Price < minPrice { // FIXED: Changed from > to <
+			minPrice = price.Price
+		}
+	}
+	return minPrice
 }
