@@ -1,4 +1,4 @@
-// internal/core/service/prices/prices_with_period.go
+// internal/core/service/prices/average_prices_with_period.go - FIXED VERSION
 package prices
 
 import (
@@ -170,21 +170,11 @@ func (s *PriceService) GetAveragePriceByExchangeWithPeriod(ctx context.Context, 
 	return result, nil
 }
 
-// Helper methods for cache operations
+// FIXED: Helper methods for cache operations - now calculate actual average
 
 func (s *PriceService) getAveragePriceFromCache(ctx context.Context, symbol string, exchanges []string, startTime, endTime time.Time, duration time.Duration) (*domain.MarketData, error) {
 	if s.cache == nil {
 		return nil, fmt.Errorf("cache not available")
-	}
-
-	// Check if cache has the method we need
-	type AveragePriceCache interface {
-		GetAveragePriceInRange(ctx context.Context, symbol string, exchanges []string, from, to time.Time) (*domain.MarketData, error)
-	}
-
-	cacheWithAverage, ok := s.cache.(AveragePriceCache)
-	if !ok {
-		return nil, fmt.Errorf("cache does not support average price range queries")
 	}
 
 	slog.Debug("Getting average price from cache",
@@ -192,7 +182,61 @@ func (s *PriceService) getAveragePriceFromCache(ctx context.Context, symbol stri
 		"exchanges", exchanges,
 		"duration", duration)
 
-	return cacheWithAverage.GetAveragePriceInRange(ctx, symbol, exchanges, startTime, endTime)
+	// Get all price data from all exchanges in the time range
+	var allPrices []domain.MarketData
+
+	for _, exchange := range exchanges {
+		prices, err := s.cache.GetPricesInRangeByExchange(ctx, symbol, exchange, startTime, endTime)
+		if err != nil {
+			slog.Debug("No prices found for exchange in cache",
+				"exchange", exchange,
+				"symbol", symbol,
+				"error", err)
+			continue // Skip this exchange if no data
+		}
+
+		if len(prices) > 0 {
+			allPrices = append(allPrices, prices...)
+		}
+	}
+
+	if len(allPrices) == 0 {
+		return nil, fmt.Errorf("no price data found in cache for any exchange")
+	}
+
+	// FIXED: Calculate actual average price from all the raw prices
+	var sum float64
+	var latestTimestamp int64
+	var latestExchange string
+
+	for _, price := range allPrices {
+		sum += price.Price
+		if price.Timestamp > latestTimestamp {
+			latestTimestamp = price.Timestamp
+			latestExchange = price.Exchange
+		}
+	}
+
+	averagePrice := sum / float64(len(allPrices))
+
+	result := &domain.MarketData{
+		Symbol:    symbol,
+		Price:     averagePrice, // FIXED: Use calculated average
+		Timestamp: latestTimestamp,
+		Exchange:  "multiple", // Indicate this is from multiple exchanges
+	}
+
+	if len(exchanges) == 1 {
+		result.Exchange = latestExchange // Use actual exchange name if only one
+	}
+
+	slog.Debug("Calculated average price from cache",
+		"symbol", symbol,
+		"average_price", averagePrice,
+		"data_points", len(allPrices),
+		"exchanges_checked", len(exchanges))
+
+	return result, nil
 }
 
 func (s *PriceService) getAveragePriceByExchangeFromCache(ctx context.Context, symbol, exchange string, startTime, endTime time.Time, duration time.Duration) (*domain.MarketData, error) {
@@ -200,25 +244,51 @@ func (s *PriceService) getAveragePriceByExchangeFromCache(ctx context.Context, s
 		return nil, fmt.Errorf("cache not available")
 	}
 
-	// Check if cache has the method we need
-	type AveragePriceByExchangeCache interface {
-		GetAveragePriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error)
-	}
-
-	cacheWithAverage, ok := s.cache.(AveragePriceByExchangeCache)
-	if !ok {
-		return nil, fmt.Errorf("cache does not support average price range queries by exchange")
-	}
-
 	slog.Debug("Getting average price by exchange from cache",
 		"symbol", symbol,
 		"exchange", exchange,
 		"duration", duration)
 
-	return cacheWithAverage.GetAveragePriceInRangeByExchange(ctx, symbol, exchange, startTime, endTime)
+	// Get price data from specific exchange
+	prices, err := s.cache.GetPricesInRangeByExchange(ctx, symbol, exchange, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get prices from cache: %w", err)
+	}
+
+	if len(prices) == 0 {
+		return nil, fmt.Errorf("no price data found in cache for exchange %s", exchange)
+	}
+
+	// FIXED: Calculate actual average price from all the raw prices
+	var sum float64
+	var latestTimestamp int64
+
+	for _, price := range prices {
+		sum += price.Price
+		if price.Timestamp > latestTimestamp {
+			latestTimestamp = price.Timestamp
+		}
+	}
+
+	averagePrice := sum / float64(len(prices))
+
+	result := &domain.MarketData{
+		Symbol:    symbol,
+		Price:     averagePrice, // FIXED: Use calculated average
+		Timestamp: latestTimestamp,
+		Exchange:  exchange,
+	}
+
+	slog.Debug("Calculated average price by exchange from cache",
+		"symbol", symbol,
+		"exchange", exchange,
+		"average_price", averagePrice,
+		"data_points", len(prices))
+
+	return result, nil
 }
 
-// Helper methods for database operations
+// Helper methods for database operations (these should work correctly with the fixed database methods)
 
 func (s *PriceService) getAveragePriceFromDatabase(ctx context.Context, symbol string, exchanges []string, startTime, endTime time.Time, duration time.Duration) (*domain.MarketData, error) {
 	if s.pricesRepo == nil {
