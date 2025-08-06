@@ -1,4 +1,3 @@
-// internal/adapters/handler/http/v1/exchangeHandler.go
 package v1
 
 import (
@@ -19,14 +18,12 @@ func NewExchangeHandler(exchangeService port.ExchangeService) *ExchangeHandler {
 	}
 }
 
-// Response structures
 type ModeResponse struct {
 	Mode             string   `json:"mode"`
 	AllowedExchanges []string `json:"allowed_exchanges"`
 	Message          string   `json:"message"`
 }
 
-// SwitchToTestMode switches to test mode (only affects data reading)
 func (h *ExchangeHandler) SwitchToTestMode(w http.ResponseWriter, r *http.Request) {
 	err := h.exchangeService.SwitchToTestMode(r.Context())
 	if err != nil {
@@ -43,7 +40,6 @@ func (h *ExchangeHandler) SwitchToTestMode(w http.ResponseWriter, r *http.Reques
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// SwitchToLiveMode switches to live mode (only affects data reading)
 func (h *ExchangeHandler) SwitchToLiveMode(w http.ResponseWriter, r *http.Request) {
 	err := h.exchangeService.SwitchToLiveMode(r.Context())
 	if err != nil {
@@ -60,9 +56,7 @@ func (h *ExchangeHandler) SwitchToLiveMode(w http.ResponseWriter, r *http.Reques
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// NEW: SwitchToAllMode switches to all mode (uses data from all exchanges)
 func (h *ExchangeHandler) SwitchToAllMode(w http.ResponseWriter, r *http.Request) {
-	// Check if the service supports all mode
 	if svc, ok := h.exchangeService.(interface{ SwitchToAllMode(context.Context) error }); ok {
 		err := svc.SwitchToAllMode(r.Context())
 		if err != nil {
@@ -82,7 +76,6 @@ func (h *ExchangeHandler) SwitchToAllMode(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// GetCurrentMode returns the current mode and allowed exchanges
 func (h *ExchangeHandler) GetCurrentMode(w http.ResponseWriter, r *http.Request) {
 	response := ModeResponse{
 		Mode:             h.exchangeService.GetCurrentMode(),
@@ -93,9 +86,7 @@ func (h *ExchangeHandler) GetCurrentMode(w http.ResponseWriter, r *http.Request)
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// NEW: GetServiceStats returns detailed service statistics
 func (h *ExchangeHandler) GetServiceStats(w http.ResponseWriter, r *http.Request) {
-	// Check if the service supports stats
 	if svc, ok := h.exchangeService.(interface{ GetStats() map[string]interface{} }); ok {
 		stats := svc.GetStats()
 		h.writeJSONResponse(w, http.StatusOK, stats)
@@ -104,14 +95,11 @@ func (h *ExchangeHandler) GetServiceStats(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// Helper methods
-
 func (h *ExchangeHandler) writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		// If we can't encode the response, log the error and send a simple error message
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error":"internal_error","message":"failed to encode response"}`))
 	}

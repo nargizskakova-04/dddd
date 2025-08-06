@@ -1,4 +1,3 @@
-// internal/adapters/repository/postgres/lowest_prices.go
 package postgres
 
 import (
@@ -15,17 +14,15 @@ func (r *PricesRepository) GetLowestPriceFromLatestRecords(ctx context.Context, 
 		return nil, fmt.Errorf("no allowed exchanges provided")
 	}
 
-	// Create placeholders for the IN clause
 	placeholders := make([]string, len(allowedExchanges))
 	args := make([]interface{}, len(allowedExchanges)+1)
-	args[0] = symbol // First argument is the symbol
+	args[0] = symbol
 
 	for i, exchange := range allowedExchanges {
-		placeholders[i] = fmt.Sprintf("$%d", i+2) // Start from $2 since $1 is symbol
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
 		args[i+1] = exchange
 	}
 
-	// LIMIT 3: Get latest record from each of the 3 allowed exchanges
 	query := fmt.Sprintf(`
 		WITH latest_records AS (
 			SELECT pair_name, exchange, timestamp, average_price, min_price, max_price
@@ -53,20 +50,16 @@ func (r *PricesRepository) GetLowestPriceFromLatestRecords(ctx context.Context, 
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get lowest price from latest records: %w", err)
 	}
 
-	// ✅ ИСПРАВЛЕНО: Консистентность - используем секунды как в остальной системе
 	marketData.Timestamp = timestamp.Unix()
 	return &marketData, nil
 }
 
-// ✅ ИСПРАВЛЕНО: Теперь действительно берем 30 записей ИЛИ упрощаем логику для latest
-// GetLowestPriceByExchangeFromLatestRecord returns the lowest min_price from the latest record of specific exchange
 func (r *PricesRepository) GetLowestPriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
-	// ✅ УПРОЩЕНО: Если нужна только последняя запись, то просто берем min_price из неё
 	query := `
 		SELECT pair_name, exchange, timestamp, min_price
 		FROM prices
@@ -87,12 +80,11 @@ func (r *PricesRepository) GetLowestPriceByExchangeFromLatestRecord(ctx context.
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get lowest price by exchange from latest record: %w", err)
 	}
 
-	// ✅ ИСПРАВЛЕНО: Консистентность
 	marketData.Timestamp = timestamp.Unix()
 	return &marketData, nil
 }

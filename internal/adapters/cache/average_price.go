@@ -9,7 +9,6 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
-// GetAveragePriceInRange finds the average price for a symbol across all allowed exchanges within a time range
 func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string, exchanges []string, from, to time.Time) (*domain.MarketData, error) {
 	if len(exchanges) == 0 {
 		return nil, fmt.Errorf("no exchanges specified")
@@ -24,7 +23,6 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 
 	var allPrices []domain.MarketData
 
-	// Collect prices from all specified exchanges
 	for _, exchange := range exchanges {
 		prices, err := r.GetPricesInRangeByExchange(ctx, symbol, exchange, from, to)
 		if err != nil {
@@ -32,7 +30,7 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 				"exchange", exchange,
 				"symbol", symbol,
 				"error", err)
-			continue // Skip this exchange if no data or error
+			continue
 		}
 
 		if len(prices) == 0 {
@@ -42,7 +40,6 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 			continue
 		}
 
-		// Add all prices from this exchange
 		allPrices = append(allPrices, prices...)
 
 		slog.Debug("Processed exchange data",
@@ -57,7 +54,6 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 		return nil, fmt.Errorf("no price data found for symbol %s from exchanges %v in time range", symbol, exchanges)
 	}
 
-	// Calculate the actual average price
 	averagePrice := calculateAveragePrice(allPrices)
 
 	slog.Info("Found average price in cache",
@@ -71,7 +67,6 @@ func (r *RedisAdapter) GetAveragePriceInRange(ctx context.Context, symbol string
 	return averagePrice, nil
 }
 
-// GetAveragePriceInRangeByExchange finds the average price for a symbol from a specific exchange within a time range
 func (r *RedisAdapter) GetAveragePriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error) {
 	slog.Debug("Getting average price in range by exchange from cache",
 		"symbol", symbol,
@@ -92,7 +87,6 @@ func (r *RedisAdapter) GetAveragePriceInRangeByExchange(ctx context.Context, sym
 		return nil, fmt.Errorf("no price data found for symbol %s from exchange %s in time range", symbol, exchange)
 	}
 
-	// Calculate the actual average price
 	averagePrice := calculateAveragePrice(prices)
 
 	slog.Info("Found average price in cache for exchange",
@@ -105,7 +99,6 @@ func (r *RedisAdapter) GetAveragePriceInRangeByExchange(ctx context.Context, sym
 	return averagePrice, nil
 }
 
-// FIXED: Helper function to calculate the actual average price from a slice of MarketData
 func calculateAveragePrice(prices []domain.MarketData) *domain.MarketData {
 	if len(prices) == 0 {
 		return nil
@@ -115,7 +108,6 @@ func calculateAveragePrice(prices []domain.MarketData) *domain.MarketData {
 	var latestTimestamp int64
 	var latestExchange string
 
-	// Calculate sum and find the most recent data point for metadata
 	for _, price := range prices {
 		sum += price.Price
 		if price.Timestamp > latestTimestamp {
@@ -124,18 +116,16 @@ func calculateAveragePrice(prices []domain.MarketData) *domain.MarketData {
 		}
 	}
 
-	// Calculate actual average
 	averagePrice := sum / float64(len(prices))
 
 	return &domain.MarketData{
-		Symbol:    prices[0].Symbol, // All prices should have the same symbol
-		Price:     averagePrice,     // FIXED: Now using actual average
-		Timestamp: latestTimestamp,  // Use timestamp from most recent data point
-		Exchange:  latestExchange,   // Use exchange from most recent data point
+		Symbol:    prices[0].Symbol,
+		Price:     averagePrice,
+		Timestamp: latestTimestamp,
+		Exchange:  latestExchange,
 	}
 }
 
-// FIXED: Helper function to get average price from a slice of MarketData (for logging)
 func getAvgPriceFromData(prices []domain.MarketData) float64 {
 	if len(prices) == 0 {
 		return 0
@@ -146,5 +136,5 @@ func getAvgPriceFromData(prices []domain.MarketData) float64 {
 		sum += price.Price
 	}
 
-	return sum / float64(len(prices)) // FIXED: Now returns actual average
+	return sum / float64(len(prices))
 }

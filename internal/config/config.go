@@ -19,7 +19,6 @@ func GetConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to decode config: %w", err)
 	}
 
-	// Override with environment variables
 	if port := os.Getenv("PORT"); port != "" {
 		p, err := strconv.Atoi(port)
 		if err != nil {
@@ -28,7 +27,6 @@ func GetConfig(path string) (*Config, error) {
 		cfg.App.Port = p
 	}
 
-	// DB environment variables
 	if host := os.Getenv("DB_HOST"); host != "" {
 		cfg.Repository.DBHost = host
 	}
@@ -47,7 +45,6 @@ func GetConfig(path string) (*Config, error) {
 		cfg.Repository.DBName = name
 	}
 
-	// Redis environment variables (ДОБАВЛЕНО)
 	if redisHost := os.Getenv("REDIS_HOST"); redisHost != "" {
 		cfg.Cache.RedisHost = redisHost
 	}
@@ -76,7 +73,6 @@ func GetConfig(path string) (*Config, error) {
 		cfg.Cache.WriteTimeout = writeTimeout
 	}
 
-	// Exchange environment variables
 	if len(cfg.Exchanges.LiveExchanges) >= 3 {
 		if exchange1Host := os.Getenv("EXCHANGE1_HOST"); exchange1Host != "" {
 			cfg.Exchanges.LiveExchanges[0].Host = exchange1Host
@@ -104,7 +100,6 @@ func GetConfig(path string) (*Config, error) {
 		}
 	}
 
-	// Test mode environment variables
 	if updateInterval := os.Getenv("TEST_UPDATE_INTERVAL_MS"); updateInterval != "" {
 		if interval, err := strconv.Atoi(updateInterval); err == nil {
 			cfg.Exchanges.TestMode.UpdateIntervalMs = interval

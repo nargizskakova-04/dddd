@@ -1,4 +1,3 @@
-// internal/core/service/exchange/switch_mode.go
 package exchange
 
 import (
@@ -6,14 +5,13 @@ import (
 	"log/slog"
 )
 
-// SwitchToLiveMode switches to live mode (only affects reading from Redis)
 func (e *ExchangeService) SwitchToLiveMode(ctx context.Context) error {
 	e.modeMutex.Lock()
 	defer e.modeMutex.Unlock()
 
 	if e.currentMode == ModeLive {
 		slog.Info("Already in live mode")
-		return nil // Already in live mode
+		return nil
 	}
 
 	previousMode := e.currentMode
@@ -25,14 +23,13 @@ func (e *ExchangeService) SwitchToLiveMode(ctx context.Context) error {
 	return nil
 }
 
-// SwitchToTestMode switches to test mode (only affects reading from Redis)
 func (e *ExchangeService) SwitchToTestMode(ctx context.Context) error {
 	e.modeMutex.Lock()
 	defer e.modeMutex.Unlock()
 
 	if e.currentMode == ModeTest {
 		slog.Info("Already in test mode")
-		return nil // Already in test mode
+		return nil
 	}
 
 	previousMode := e.currentMode
@@ -44,14 +41,13 @@ func (e *ExchangeService) SwitchToTestMode(ctx context.Context) error {
 	return nil
 }
 
-// SwitchToAllMode switches to all mode (uses data from all exchanges)
 func (e *ExchangeService) SwitchToAllMode(ctx context.Context) error {
 	e.modeMutex.Lock()
 	defer e.modeMutex.Unlock()
 
 	if e.currentMode == ModeAll {
 		slog.Info("Already in all mode")
-		return nil // Already in all mode
+		return nil
 	}
 
 	previousMode := e.currentMode
@@ -63,14 +59,12 @@ func (e *ExchangeService) SwitchToAllMode(ctx context.Context) error {
 	return nil
 }
 
-// GetCurrentMode returns the current mode
 func (e *ExchangeService) GetCurrentMode() string {
 	e.modeMutex.RLock()
 	defer e.modeMutex.RUnlock()
 	return e.currentMode
 }
 
-// GetModeExchanges returns the list of exchange names that should be used for the current mode
 func (e *ExchangeService) GetModeExchanges() []string {
 	e.modeMutex.RLock()
 	defer e.modeMutex.RUnlock()
@@ -83,12 +77,11 @@ func (e *ExchangeService) GetModeExchanges() []string {
 	case ModeAll:
 		return []string{"exchange1", "exchange2", "exchange3", "test-exchange1", "test-exchange2", "test-exchange3"}
 	default:
-		// Default to live mode exchanges
+
 		return []string{"exchange1", "exchange2", "exchange3"}
 	}
 }
 
-// IsExchangeInCurrentMode checks if an exchange should be used in the current mode
 func (e *ExchangeService) IsExchangeInCurrentMode(exchangeName string) bool {
 	allowedExchanges := e.GetModeExchanges()
 

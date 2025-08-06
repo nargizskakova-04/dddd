@@ -1,4 +1,3 @@
-// internal/adapters/cache/redis.go - FIXED VERSION with millisecond timestamp support
 package cache
 
 import (
@@ -24,28 +23,22 @@ func NewRedisAdapter(client *redis.Client) port.Cache {
 	}
 }
 
-// SetPrice stores price data with timestamp (unchanged)
 func (r *RedisAdapter) SetPrice(ctx context.Context, key string, data domain.MarketData) error {
-	// Store latest price for quick access
 	latestKey := fmt.Sprintf("latest:%s:%s", data.Symbol, data.Exchange)
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("failed to marshal market data: %w", err)
 	}
 
-	// Set latest price with 2 minute expiration
 	if err := r.client.Set(ctx, latestKey, dataBytes, 2*time.Minute).Err(); err != nil {
 		return fmt.Errorf("failed to set latest price: %w", err)
 	}
 
-	// Store in time-series sorted set for range queries
 	timeSeriesKey := fmt.Sprintf("timeseries:%s:%s", data.Symbol, data.Exchange)
 
-	// SIMPLIFIED: Assume timestamp is always in milliseconds (no magic number check)
 	score := float64(data.Timestamp)
 	member := fmt.Sprintf("%f", data.Price)
 
-	// Add to sorted set with score as timestamp (in milliseconds)
 	if err := r.client.ZAdd(ctx, timeSeriesKey, redis.Z{
 		Score:  score,
 		Member: member,
@@ -53,13 +46,11 @@ func (r *RedisAdapter) SetPrice(ctx context.Context, key string, data domain.Mar
 		return fmt.Errorf("failed to add to time series: %w", err)
 	}
 
-	// Set expiration for time series
 	r.client.Expire(ctx, timeSeriesKey, 2*time.Minute)
 
 	return nil
 }
 
-// GetLatestPrice retrieves the latest price for a symbol across all exchanges (unchanged)
 func (r *RedisAdapter) GetLatestPrice(ctx context.Context, symbol string) (*domain.MarketData, error) {
 	pattern := fmt.Sprintf("latest:%s:*", symbol)
 	keys, err := r.client.Keys(ctx, pattern).Result()
@@ -71,7 +62,6 @@ func (r *RedisAdapter) GetLatestPrice(ctx context.Context, symbol string) (*doma
 		return nil, fmt.Errorf("no price data found for symbol %s", symbol)
 	}
 
-	// Get the most recent price
 	var latestData *domain.MarketData
 	var latestTimestamp int64
 
@@ -99,7 +89,6 @@ func (r *RedisAdapter) GetLatestPrice(ctx context.Context, symbol string) (*doma
 	return latestData, nil
 }
 
-// GetLatestPriceByExchange retrieves the latest price for a symbol from specific exchange (unchanged)
 func (r *RedisAdapter) GetLatestPriceByExchange(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
 	key := fmt.Sprintf("latest:%s:%s", symbol, exchange)
 
@@ -119,7 +108,6 @@ func (r *RedisAdapter) GetLatestPriceByExchange(ctx context.Context, symbol, exc
 	return &data, nil
 }
 
-// GetLatestPriceFromExchanges retrieves latest price from a filtered list of exchanges
 func (r *RedisAdapter) GetLatestPriceFromExchanges(ctx context.Context, symbol string, exchanges []string) (*domain.MarketData, error) {
 	if len(exchanges) == 0 {
 		return nil, fmt.Errorf("no exchanges specified")
@@ -128,18 +116,17 @@ func (r *RedisAdapter) GetLatestPriceFromExchanges(ctx context.Context, symbol s
 	var latestData *domain.MarketData
 	var latestTimestamp int64
 
-	// Check each specified exchange
 	for _, exchange := range exchanges {
 		key := fmt.Sprintf("latest:%s:%s", symbol, exchange)
 
 		dataStr, err := r.client.Get(ctx, key).Result()
 		if err != nil {
-			continue // Skip this exchange if no data
+			continue
 		}
 
 		var data domain.MarketData
 		if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
-			continue // Skip this data if unmarshal fails
+			continue
 		}
 
 		if data.Timestamp > latestTimestamp {
@@ -156,7 +143,6 @@ func (r *RedisAdapter) GetLatestPriceFromExchanges(ctx context.Context, symbol s
 }
 
 func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from, to time.Time) ([]domain.MarketData, error) {
-	// Get all exchanges for this symbol
 	pattern := fmt.Sprintf("timeseries:%s:*", symbol)
 	keys, err := r.client.Keys(ctx, pattern).Result()
 	if err != nil {
@@ -165,19 +151,16 @@ func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from
 
 	var allData []domain.MarketData
 
-	// SIMPLIFIED: Convert time range to milliseconds
 	fromScore := float64(from.UnixMilli())
 	toScore := float64(to.UnixMilli())
 
 	for _, key := range keys {
-		// Extract exchange name from key
 		parts := parseTimeSeriesKey(key)
 		if len(parts) < 3 {
 			continue
 		}
 		exchange := parts[2]
 
-		// Get prices in range
 		results, err := r.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
 			Min: strconv.FormatFloat(fromScore, 'f', -1, 64),
 			Max: strconv.FormatFloat(toScore, 'f', -1, 64),
@@ -186,20 +169,17 @@ func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from
 			continue
 		}
 
-		// Convert to MarketData
 		for _, result := range results {
 			price, err := strconv.ParseFloat(result, 64)
 			if err != nil {
 				continue
 			}
 
-			// Get timestamp from score
 			scores, err := r.client.ZScore(ctx, key, result).Result()
 			if err != nil {
 				continue
 			}
 
-			// SIMPLIFIED: timestamp is always in milliseconds
 			timestamp := int64(scores)
 
 			data := domain.MarketData{
@@ -218,7 +198,6 @@ func (r *RedisAdapter) GetPricesInRange(ctx context.Context, symbol string, from
 func (r *RedisAdapter) GetPricesInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.MarketData, error) {
 	key := fmt.Sprintf("timeseries:%s:%s", symbol, exchange)
 
-	// SIMPLIFIED: Convert time range to milliseconds
 	fromScore := float64(from.UnixMilli())
 	toScore := float64(to.UnixMilli())
 
@@ -237,13 +216,11 @@ func (r *RedisAdapter) GetPricesInRangeByExchange(ctx context.Context, symbol, e
 			continue
 		}
 
-		// Get timestamp from score
 		scores, err := r.client.ZScore(ctx, key, result).Result()
 		if err != nil {
 			continue
 		}
 
-		// SIMPLIFIED: timestamp is always in milliseconds
 		timestamp := int64(scores)
 
 		marketData := domain.MarketData{
@@ -264,11 +241,9 @@ func (r *RedisAdapter) GetPricesInRangeFromExchanges(ctx context.Context, symbol
 
 	var allData []domain.MarketData
 
-	// SIMPLIFIED: Convert time range to milliseconds
 	fromScore := float64(from.UnixMilli())
 	toScore := float64(to.UnixMilli())
 
-	// Check each specified exchange
 	for _, exchange := range exchanges {
 		key := fmt.Sprintf("timeseries:%s:%s", symbol, exchange)
 
@@ -277,23 +252,20 @@ func (r *RedisAdapter) GetPricesInRangeFromExchanges(ctx context.Context, symbol
 			Max: strconv.FormatFloat(toScore, 'f', -1, 64),
 		}).Result()
 		if err != nil {
-			continue // Skip this exchange if error
+			continue
 		}
 
-		// Convert to MarketData
 		for _, result := range results {
 			price, err := strconv.ParseFloat(result, 64)
 			if err != nil {
 				continue
 			}
 
-			// Get timestamp from score
 			scores, err := r.client.ZScore(ctx, key, result).Result()
 			if err != nil {
 				continue
 			}
 
-			// SIMPLIFIED: timestamp is always in milliseconds
 			timestamp := int64(scores)
 
 			data := domain.MarketData{
@@ -312,10 +284,8 @@ func (r *RedisAdapter) GetPricesInRangeFromExchanges(ctx context.Context, symbol
 func (r *RedisAdapter) CleanupOldData(ctx context.Context, olderThan time.Duration) error {
 	cutoffTime := time.Now().Add(-olderThan)
 
-	// SIMPLIFIED: Convert to milliseconds
 	cutoffScore := float64(cutoffTime.UnixMilli())
 
-	// Clean up time series data
 	timeSeriesPattern := "timeseries:*"
 	keys, err := r.client.Keys(ctx, timeSeriesPattern).Result()
 	if err != nil {
@@ -323,19 +293,18 @@ func (r *RedisAdapter) CleanupOldData(ctx context.Context, olderThan time.Durati
 	}
 
 	for _, key := range keys {
-		// Remove old entries from sorted set
+
 		_, err := r.client.ZRemRangeByScore(ctx, key, "0", strconv.FormatFloat(cutoffScore, 'f', -1, 64)).Result()
 		if err != nil {
-			continue // Continue with other keys
+			continue
 		}
 	}
 
-	// Clean up latest price data
 	latestPattern := "latest:*"
 	latestKeys, err := r.client.Keys(ctx, latestPattern).Result()
 	if err == nil {
 		for _, key := range latestKeys {
-			// Check if the data is too old
+
 			dataStr, err := r.client.Get(ctx, key).Result()
 			if err != nil {
 				continue
@@ -346,7 +315,6 @@ func (r *RedisAdapter) CleanupOldData(ctx context.Context, olderThan time.Durati
 				continue
 			}
 
-			// SIMPLIFIED: timestamp is always in milliseconds
 			dataTime := time.UnixMilli(data.Timestamp)
 
 			if dataTime.Before(cutoffTime) {
@@ -358,12 +326,10 @@ func (r *RedisAdapter) CleanupOldData(ctx context.Context, olderThan time.Durati
 	return nil
 }
 
-// Ping checks Redis connection health (unchanged)
 func (r *RedisAdapter) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
 
-// parseTimeSeriesKey parses a timeseries key to extract components (unchanged)
 func parseTimeSeriesKey(key string) []string {
 	result := make([]string, 0)
 	current := ""

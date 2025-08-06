@@ -10,7 +10,6 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
-// GetLowestPriceInRange finds the lowest price for a symbol across all allowed exchanges within a time range
 func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string, exchanges []string, from, to time.Time) (*domain.MarketData, error) {
 	if len(exchanges) == 0 {
 		return nil, fmt.Errorf("no exchanges specified")
@@ -24,9 +23,8 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 		"duration", to.Sub(from))
 
 	var lowestPrice *domain.MarketData
-	var minPrice float64 // FIXED: Changed from maxPrice to minPrice
+	var minPrice float64
 
-	// Check each specified exchange
 	for _, exchange := range exchanges {
 		prices, err := r.GetPricesInRangeByExchange(ctx, symbol, exchange, from, to)
 		if err != nil {
@@ -34,7 +32,7 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 				"exchange", exchange,
 				"symbol", symbol,
 				"error", err)
-			continue // Skip this exchange if no data or error
+			continue
 		}
 
 		if len(prices) == 0 {
@@ -44,9 +42,8 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 			continue
 		}
 
-		// Find lowest price in this exchange's data
 		for _, price := range prices {
-			// FIXED: Proper lowest price logic
+
 			if lowestPrice == nil || price.Price < minPrice {
 				minPrice = price.Price
 				lowestPrice = &domain.MarketData{
@@ -61,7 +58,7 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 		slog.Debug("Processed exchange data",
 			"exchange", exchange,
 			"data_points", len(prices),
-			"exchange_min_price", getMinPriceFromData(prices)) // FIXED: Changed function name
+			"exchange_min_price", getMinPriceFromData(prices))
 	}
 
 	if lowestPrice == nil {
@@ -81,7 +78,6 @@ func (r *RedisAdapter) GetLowestPriceInRange(ctx context.Context, symbol string,
 	return lowestPrice, nil
 }
 
-// GetLowestPriceInRangeByExchange finds the lowest price for a symbol from a specific exchange within a time range
 func (r *RedisAdapter) GetLowestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error) {
 	slog.Debug("Getting lowest price in range by exchange from cache",
 		"symbol", symbol,
@@ -102,12 +98,10 @@ func (r *RedisAdapter) GetLowestPriceInRangeByExchange(ctx context.Context, symb
 		return nil, fmt.Errorf("no price data found for symbol %s from exchange %s in time range", symbol, exchange)
 	}
 
-	// Find the lowest price
 	lowestPrice := &prices[0]
-	minPrice := prices[0].Price // FIXED: Changed from maxPrice to minPrice
+	minPrice := prices[0].Price
 
 	for i := 1; i < len(prices); i++ {
-		// FIXED: Proper lowest price comparison
 		if prices[i].Price < minPrice {
 			minPrice = prices[i].Price
 			lowestPrice = &prices[i]
@@ -124,7 +118,6 @@ func (r *RedisAdapter) GetLowestPriceInRangeByExchange(ctx context.Context, symb
 	return lowestPrice, nil
 }
 
-// FIXED: Helper function to get min price from a slice of MarketData
 func getMinPriceFromData(prices []domain.MarketData) float64 {
 	if len(prices) == 0 {
 		return 0
@@ -132,7 +125,7 @@ func getMinPriceFromData(prices []domain.MarketData) float64 {
 
 	minPrice := prices[0].Price
 	for _, price := range prices[1:] {
-		if price.Price < minPrice { // FIXED: Changed from > to <
+		if price.Price < minPrice {
 			minPrice = price.Price
 		}
 	}

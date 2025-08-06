@@ -1,4 +1,3 @@
-// internal/adapters/repository/postgres/lowest_prices_range.go
 package postgres
 
 import (
@@ -11,7 +10,6 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
-// GetLowestPriceInRange finds the lowest min_price across all allowed exchanges within a time range
 func (r *PricesRepository) GetLowestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error) {
 	if len(allowedExchanges) == 0 {
 		return nil, fmt.Errorf("no allowed exchanges provided")
@@ -24,7 +22,6 @@ func (r *PricesRepository) GetLowestPriceInRange(ctx context.Context, symbol str
 		"to", to.Format(time.RFC3339),
 		"duration", to.Sub(from))
 
-	// Create placeholders for the IN clause
 	placeholders := make([]string, len(allowedExchanges))
 	args := make([]interface{}, len(allowedExchanges)+3)
 	args[0] = symbol
@@ -32,7 +29,7 @@ func (r *PricesRepository) GetLowestPriceInRange(ctx context.Context, symbol str
 	args[2] = to
 
 	for i, exchange := range allowedExchanges {
-		placeholders[i] = fmt.Sprintf("$%d", i+4) // Start from $4 since $1=symbol, $2=from, $3=to
+		placeholders[i] = fmt.Sprintf("$%d", i+4)
 		args[i+3] = exchange
 	}
 
@@ -71,12 +68,11 @@ func (r *PricesRepository) GetLowestPriceInRange(ctx context.Context, symbol str
 				"symbol", symbol,
 				"exchanges", allowedExchanges,
 				"time_range", fmt.Sprintf("%s to %s", from.Format(time.RFC3339), to.Format(time.RFC3339)))
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get lowest price in range: %w", err)
 	}
 
-	// Convert timestamp to Unix seconds for consistency
 	marketData.Timestamp = timestamp.Unix()
 
 	slog.Info("Found lowest price in database",
@@ -89,7 +85,6 @@ func (r *PricesRepository) GetLowestPriceInRange(ctx context.Context, symbol str
 	return &marketData, nil
 }
 
-// GetLowestPriceInRangeByExchange finds the lowest min_price from specific exchange within a time range
 func (r *PricesRepository) GetLowestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error) {
 	slog.Debug("Getting lowest price in range by exchange from database",
 		"symbol", symbol,
@@ -133,12 +128,11 @@ func (r *PricesRepository) GetLowestPriceInRangeByExchange(ctx context.Context, 
 				"symbol", symbol,
 				"exchange", exchange,
 				"time_range", fmt.Sprintf("%s to %s", from.Format(time.RFC3339), to.Format(time.RFC3339)))
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get lowest price in range by exchange: %w", err)
 	}
 
-	// Convert timestamp to Unix seconds for consistency
 	marketData.Timestamp = timestamp.Unix()
 
 	slog.Info("Found lowest price in database for exchange",

@@ -30,7 +30,7 @@ func Start() error {
 
 	if *helpFlag {
 		flag.Usage()
-		os.Exit(0) // Exit cleanly when help is requested
+		os.Exit(0)
 	}
 
 	slog.Info("Loading configuration...")

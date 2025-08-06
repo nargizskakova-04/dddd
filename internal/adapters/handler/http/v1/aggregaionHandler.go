@@ -1,4 +1,3 @@
-// internal/adapters/handler/http/v1/aggregationHandler.go
 package v1
 
 import (
@@ -19,7 +18,6 @@ func NewAggregationHandler(aggregationService *aggregation.AggregationService) *
 	}
 }
 
-// Response structures
 type AggregationStatusResponse struct {
 	Status    string                 `json:"status"`
 	Message   string                 `json:"message"`
@@ -28,7 +26,7 @@ type AggregationStatusResponse struct {
 }
 
 type TriggerAggregationRequest struct {
-	AggregationTime string `json:"aggregation_time,omitempty"` // ISO 8601 format
+	AggregationTime string `json:"aggregation_time,omitempty"`
 }
 
 type TriggerAggregationResponse struct {
@@ -38,7 +36,6 @@ type TriggerAggregationResponse struct {
 	Timestamp       string `json:"timestamp"`
 }
 
-// GetAggregationStatus returns the current status of the aggregation service
 func (h *AggregationHandler) GetAggregationStatus(w http.ResponseWriter, r *http.Request) {
 	if h.aggregationService == nil {
 		h.writeErrorResponse(w, http.StatusServiceUnavailable, "Aggregation service is not available")
@@ -47,7 +44,6 @@ func (h *AggregationHandler) GetAggregationStatus(w http.ResponseWriter, r *http
 
 	healthStatus := h.aggregationService.GetHealthStatus(r.Context())
 
-	// Determine overall status
 	status := "healthy"
 	message := "Aggregation service is running normally"
 
@@ -75,14 +71,12 @@ func (h *AggregationHandler) GetAggregationStatus(w http.ResponseWriter, r *http
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// TriggerManualAggregation triggers a manual aggregation for a specific time or current time
 func (h *AggregationHandler) TriggerManualAggregation(w http.ResponseWriter, r *http.Request) {
 	if h.aggregationService == nil {
 		h.writeErrorResponse(w, http.StatusServiceUnavailable, "Aggregation service is not available")
 		return
 	}
 
-	// Parse request body if provided
 	var req TriggerAggregationRequest
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -91,23 +85,21 @@ func (h *AggregationHandler) TriggerManualAggregation(w http.ResponseWriter, r *
 		}
 	}
 
-	// Determine aggregation time
 	var aggregationTime time.Time
 	var err error
 
 	if req.AggregationTime != "" {
-		// Parse provided time
+
 		aggregationTime, err = time.Parse(time.RFC3339, req.AggregationTime)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusBadRequest, "Invalid aggregation_time format. Use ISO 8601 format (e.g., 2023-12-25T10:30:00Z)")
 			return
 		}
 	} else {
-		// Use current time truncated to the minute
+
 		aggregationTime = time.Now().Truncate(time.Minute)
 	}
 
-	// Trigger manual aggregation
 	if err := h.aggregationService.TriggerManualAggregation(r.Context(), aggregationTime); err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to trigger aggregation: "+err.Error())
 		return
@@ -123,7 +115,6 @@ func (h *AggregationHandler) TriggerManualAggregation(w http.ResponseWriter, r *
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// GetAggregationHealth returns basic health check information
 func (h *AggregationHandler) GetAggregationHealth(w http.ResponseWriter, r *http.Request) {
 	if h.aggregationService == nil {
 		response := map[string]interface{}{
@@ -147,14 +138,12 @@ func (h *AggregationHandler) GetAggregationHealth(w http.ResponseWriter, r *http
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// Helper methods
-
 func (h *AggregationHandler) writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		// If we can't encode the response, log the error and send a simple error message
+
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error":"internal_error","message":"failed to encode response"}`))
 	}
