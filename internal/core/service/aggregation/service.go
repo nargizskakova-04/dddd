@@ -29,7 +29,6 @@ type PricesRepository interface {
 
 // NewAggregationService creates a new aggregation service
 func NewAggregationService(cache port.Cache, repository PricesRepository) *AggregationService {
-	// Supported symbols and exchanges
 	symbols := []string{"BTCUSDT", "DOGEUSDT", "TONUSDT", "SOLUSDT", "ETHUSDT"}
 	exchanges := []string{"exchange1", "exchange2", "exchange3", "test-exchange1", "test-exchange2", "test-exchange3"}
 
@@ -41,11 +40,9 @@ func NewAggregationService(cache port.Cache, repository PricesRepository) *Aggre
 	}
 }
 
-// AggregateData performs aggregation for the specified time window
 func (s *AggregationService) AggregateData(ctx context.Context, aggregationTime time.Time) error {
 	slog.Info("Starting data aggregation", "aggregation_time", aggregationTime)
 
-	// Calculate time window (last 60 seconds from aggregationTime)
 	endTime := aggregationTime
 	startTime := endTime.Add(-60 * time.Second)
 
@@ -60,7 +57,6 @@ func (s *AggregationService) AggregateData(ctx context.Context, aggregationTime 
 	var aggregatedPrices []domain.Prices
 	aggregationCount := 0
 
-	// Process each symbol and exchange combination
 	for _, symbol := range s.symbols {
 		for _, exchange := range s.exchanges {
 			aggregatedPrice, err := s.aggregateForSymbolExchange(ctx, symbol, exchange, startTime, endTime, aggregationTime)
@@ -87,7 +83,6 @@ func (s *AggregationService) AggregateData(ctx context.Context, aggregationTime 
 		return nil
 	}
 
-	// Insert aggregated data into PostgreSQL
 	if err := s.repository.InsertAggregatedPrices(ctx, aggregatedPrices); err != nil {
 		return fmt.Errorf("failed to insert aggregated prices: %w", err)
 	}
@@ -100,9 +95,7 @@ func (s *AggregationService) AggregateData(ctx context.Context, aggregationTime 
 	return nil
 }
 
-// aggregateForSymbolExchange aggregates data for a specific symbol/exchange combination
 func (s *AggregationService) aggregateForSymbolExchange(ctx context.Context, symbol, exchange string, startTime, endTime, aggregationTime time.Time) (*domain.Prices, error) {
-	// Skip if cache is not available
 	if s.cache == nil {
 		return nil, fmt.Errorf("cache is not available")
 	}
@@ -113,14 +106,13 @@ func (s *AggregationService) aggregateForSymbolExchange(ctx context.Context, sym
 		"start_time", startTime.Format(time.RFC3339),
 		"end_time", endTime.Format(time.RFC3339))
 
-	// Get price data from Redis for the time range
 	priceData, err := s.cache.GetPricesInRangeByExchange(ctx, symbol, exchange, startTime, endTime)
 	if err != nil {
 		slog.Debug("No price data found in cache",
 			"symbol", symbol,
 			"exchange", exchange,
 			"error", err)
-		return nil, nil // Not an error, just no data
+		return nil, nil
 	}
 
 	if len(priceData) == 0 {
@@ -130,7 +122,6 @@ func (s *AggregationService) aggregateForSymbolExchange(ctx context.Context, sym
 		return nil, nil
 	}
 
-	// Calculate aggregations
 	aggregatedPrice := s.calculateAggregations(priceData, symbol, exchange, aggregationTime)
 
 	slog.Info("Aggregated price data",
@@ -169,22 +160,19 @@ func (s *AggregationService) calculateAggregations(data []domain.MarketData, sym
 	return &domain.Prices{
 		PairName:     symbol,
 		Exchange:     exchange,
-		Timestamp:    aggregationTime.UnixMilli(), // CHANGED: Convert to milliseconds
+		Timestamp:    aggregationTime.UnixMilli(),
 		AveragePrice: averagePrice,
 		MinPrice:     minPrice,
 		MaxPrice:     maxPrice,
 	}
 }
 
-// PerformPeriodicAggregation runs aggregation every minute
 func (s *AggregationService) PerformPeriodicAggregation(ctx context.Context) {
 	slog.Info("Starting periodic aggregation routine")
 
-	// Create ticker for every minute
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
-	// Perform initial aggregation for current time
 	currentTime := time.Now().Truncate(time.Minute)
 	if err := s.AggregateData(ctx, currentTime); err != nil {
 		slog.Error("Initial aggregation failed", "error", err)
@@ -197,7 +185,6 @@ func (s *AggregationService) PerformPeriodicAggregation(ctx context.Context) {
 			return
 
 		case tickTime := <-ticker.C:
-			// Aggregate data for the previous minute
 			aggregationTime := tickTime.Truncate(time.Minute)
 
 			slog.Debug("Performing scheduled aggregation", "time", aggregationTime)
@@ -209,7 +196,6 @@ func (s *AggregationService) PerformPeriodicAggregation(ctx context.Context) {
 	}
 }
 
-// GetHealthStatus returns the health status of the aggregation service
 func (s *AggregationService) GetHealthStatus(ctx context.Context) map[string]interface{} {
 	status := map[string]interface{}{
 		"cache_available":      s.cache != nil,
@@ -218,7 +204,6 @@ func (s *AggregationService) GetHealthStatus(ctx context.Context) map[string]int
 		"exchanges_count":      len(s.exchanges),
 	}
 
-	// Check cache health
 	if s.cache != nil {
 		if err := s.cache.Ping(ctx); err != nil {
 			status["cache_healthy"] = false
@@ -228,7 +213,6 @@ func (s *AggregationService) GetHealthStatus(ctx context.Context) map[string]int
 		}
 	}
 
-	// Check repository health
 	if s.repository != nil {
 		if err := s.repository.HealthCheck(ctx); err != nil {
 			status["repository_healthy"] = false
@@ -241,7 +225,6 @@ func (s *AggregationService) GetHealthStatus(ctx context.Context) map[string]int
 	return status
 }
 
-// TriggerManualAggregation triggers a manual aggregation for a specific time
 func (s *AggregationService) TriggerManualAggregation(ctx context.Context, aggregationTime time.Time) error {
 	slog.Info("Triggering manual aggregation", "time", aggregationTime)
 

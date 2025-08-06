@@ -28,7 +28,6 @@ func (h *HealthHandler) GetSystemHealth(w http.ResponseWriter, r *http.Request) 
 
 	healthStatus := h.healthService.GetSystemHealth(r.Context())
 
-	// Determine HTTP status code based on health
 	statusCode := http.StatusOK
 	if status, ok := healthStatus["status"].(string); ok && status != "healthy" {
 		statusCode = http.StatusServiceUnavailable
@@ -45,7 +44,6 @@ func (h *HealthHandler) GetDetailedHealth(w http.ResponseWriter, r *http.Request
 
 	detailedHealth := h.healthService.GetDetailedHealth(r.Context())
 
-	// Determine HTTP status code based on overall health
 	statusCode := http.StatusOK
 	if status, ok := detailedHealth["overall_status"].(string); ok && status != "healthy" {
 		statusCode = http.StatusServiceUnavailable
@@ -54,14 +52,11 @@ func (h *HealthHandler) GetDetailedHealth(w http.ResponseWriter, r *http.Request
 	h.writeJSONResponse(w, statusCode, detailedHealth)
 }
 
-// Helper methods
-
 func (h *HealthHandler) writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		// If we can't encode the response, log the error and send a simple error message
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error":"internal_error","message":"failed to encode response"}`))
 	}
@@ -78,7 +73,6 @@ func (h *HealthHandler) writeErrorResponse(w http.ResponseWriter, statusCode int
 		Message: message,
 	}
 
-	// Add timestamp for health endpoints
 	healthResponse := map[string]interface{}{
 		"error":     response.Error,
 		"message":   response.Message,

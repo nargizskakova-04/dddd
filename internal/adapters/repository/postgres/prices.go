@@ -1,4 +1,3 @@
-// internal/adapters/repository/postgres/prices.go
 package postgres
 
 import (
@@ -25,13 +24,12 @@ func (r *PricesRepository) InsertAggregatedPrice(ctx context.Context, aggregated
         VALUES ($1, $2, $3, $4, $5, $6)
     `
 
-	// CHANGED: Convert milliseconds to time.Time for PostgreSQL
 	timestamp := time.UnixMilli(aggregatedPrice.Timestamp)
 
 	_, err := r.db.ExecContext(ctx, query,
 		aggregatedPrice.PairName,
 		aggregatedPrice.Exchange,
-		timestamp, // Convert to time.Time for database
+		timestamp,
 		aggregatedPrice.AveragePrice,
 		aggregatedPrice.MinPrice,
 		aggregatedPrice.MaxPrice,
@@ -48,14 +46,12 @@ func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregate
 		return nil
 	}
 
-	// Begin transaction
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Prepare statement
 	query := `
         INSERT INTO prices (pair_name, exchange, timestamp, average_price, min_price, max_price)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -67,15 +63,13 @@ func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregate
 	}
 	defer stmt.Close()
 
-	// Execute for each record
 	for _, price := range aggregatedPrices {
-		// CHANGED: Convert milliseconds to time.Time for PostgreSQL
 		timestamp := time.UnixMilli(price.Timestamp)
 
 		_, err := stmt.ExecContext(ctx,
 			price.PairName,
 			price.Exchange,
-			timestamp, // Convert to time.Time for database
+			timestamp,
 			price.AveragePrice,
 			price.MinPrice,
 			price.MaxPrice,
@@ -85,7 +79,6 @@ func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregate
 		}
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -93,7 +86,6 @@ func (r *PricesRepository) InsertAggregatedPrices(ctx context.Context, aggregate
 	return nil
 }
 
-// GetLatestAggregationTime returns the latest timestamp for aggregated data
 func (r *PricesRepository) GetLatestAggregationTime(ctx context.Context) (time.Time, error) {
 	query := `SELECT MAX(timestamp) FROM prices`
 
@@ -104,14 +96,12 @@ func (r *PricesRepository) GetLatestAggregationTime(ctx context.Context) (time.T
 	}
 
 	if !timestamp.Valid {
-		// No data exists, return zero time
 		return time.Time{}, nil
 	}
 
 	return timestamp.Time, nil
 }
 
-// GetAggregatedPricesInRange retrieves aggregated prices within a time range
 func (r *PricesRepository) GetAggregatedPricesInRange(ctx context.Context, symbol, exchange string, from, to time.Time) ([]domain.Prices, error) {
 	query := `
 		SELECT pair_name, exchange, timestamp, average_price, min_price, max_price
@@ -150,7 +140,6 @@ func (r *PricesRepository) GetAggregatedPricesInRange(ctx context.Context, symbo
 	return prices, nil
 }
 
-// HealthCheck performs a simple health check on the database
 func (r *PricesRepository) HealthCheck(ctx context.Context) error {
 	query := `SELECT 1`
 

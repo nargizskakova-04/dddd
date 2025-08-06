@@ -1,4 +1,3 @@
-// internal/core/service/health/service.go
 package health
 
 import (

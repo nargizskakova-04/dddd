@@ -15,7 +15,6 @@ import (
 	"cryptomarket/internal/core/port"
 )
 
-// LiveExchangeAdapter connects to real exchange programs via TCP
 type LiveExchangeAdapter struct {
 	host      string
 	port      int
@@ -43,7 +42,6 @@ func (l *LiveExchangeAdapter) Start(ctx context.Context) (<-chan domain.MarketDa
 		return l.dataChan, nil
 	}
 
-	// Connect to exchange
 	if err := l.connect(); err != nil {
 		return nil, fmt.Errorf("failed to connect to exchange %s: %w", l.name, err)
 	}
@@ -51,10 +49,8 @@ func (l *LiveExchangeAdapter) Start(ctx context.Context) (<-chan domain.MarketDa
 	l.isRunning = true
 	l.isHealthy = true
 
-	// Start reading data in goroutine
 	go l.readData(ctx)
 
-	// Start reconnection handler
 	go l.handleReconnection(ctx)
 
 	slog.Info("Live exchange adapter started", "exchange", l.name, "port", l.port)
@@ -69,15 +65,12 @@ func (l *LiveExchangeAdapter) Stop() error {
 	l.isRunning = false
 	l.isHealthy = false
 
-	// Close stop channel
 	close(l.stopChan)
 
-	// Close connection
 	if l.conn != nil {
 		l.conn.Close()
 	}
 
-	// Close data channel
 	close(l.dataChan)
 
 	slog.Info("Live exchange adapter stopped", "exchange", l.name)
@@ -132,14 +125,12 @@ func (l *LiveExchangeAdapter) readData(ctx context.Context) {
 				continue
 			}
 
-			// Parse market data from line
 			marketData, err := l.parseMarketData(line)
 			if err != nil {
 				slog.Warn("Failed to parse market data", "exchange", l.name, "line", line, "error", err)
 				continue
 			}
 
-			// Send to data channel if running
 			if l.isRunning {
 				select {
 				case l.dataChan <- *marketData:
@@ -152,13 +143,12 @@ func (l *LiveExchangeAdapter) readData(ctx context.Context) {
 }
 
 func (l *LiveExchangeAdapter) parseMarketData(line string) (*domain.MarketData, error) {
-	// Try to parse as JSON first
+
 	var jsonData map[string]interface{}
 	if err := json.Unmarshal([]byte(line), &jsonData); err == nil {
 		return l.parseJSONMarketData(jsonData)
 	}
 
-	// If not JSON, try to parse as simple format
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
 		parts = strings.Split(line, ":")
@@ -178,7 +168,7 @@ func (l *LiveExchangeAdapter) parseMarketData(line string) (*domain.MarketData, 
 	return &domain.MarketData{
 		Symbol:    symbol,
 		Price:     price,
-		Timestamp: time.Now().UnixMilli(), // ENSURE: Always milliseconds
+		Timestamp: time.Now().UnixMilli(),
 		Exchange:  l.name,
 	}, nil
 }
@@ -188,7 +178,6 @@ func (l *LiveExchangeAdapter) parseJSONMarketData(data map[string]interface{}) (
 		Exchange: l.name,
 	}
 
-	// Parse symbol
 	if symbol, ok := data["symbol"].(string); ok {
 		marketData.Symbol = symbol
 	} else if symbol, ok := data["pair"].(string); ok {
@@ -197,7 +186,6 @@ func (l *LiveExchangeAdapter) parseJSONMarketData(data map[string]interface{}) (
 		return nil, fmt.Errorf("missing symbol in JSON data")
 	}
 
-	// Parse price
 	if price, ok := data["price"].(float64); ok {
 		marketData.Price = price
 	} else if priceStr, ok := data["price"].(string); ok {
@@ -210,18 +198,17 @@ func (l *LiveExchangeAdapter) parseJSONMarketData(data map[string]interface{}) (
 		return nil, fmt.Errorf("missing price in JSON data")
 	}
 
-	// Parse timestamp
 	if timestamp, ok := data["timestamp"].(float64); ok {
-		marketData.Timestamp = int64(timestamp) // Assume it's already in milliseconds
+		marketData.Timestamp = int64(timestamp)
 	} else if timestampStr, ok := data["timestamp"].(string); ok {
 		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		marketData.Timestamp = timestamp // Assume it's already in milliseconds
+		marketData.Timestamp = timestamp
 	} else {
-		// Use current time if no timestamp provided
-		marketData.Timestamp = time.Now().UnixMilli() // ENSURE: Always milliseconds
+
+		marketData.Timestamp = time.Now().UnixMilli()
 	}
 
 	return marketData, nil
@@ -241,12 +228,10 @@ func (l *LiveExchangeAdapter) handleReconnection(ctx context.Context) {
 			if !l.isHealthy && l.isRunning {
 				slog.Info("Attempting to reconnect", "exchange", l.name)
 
-				// Close existing connection
 				if l.conn != nil {
 					l.conn.Close()
 				}
 
-				// Try to reconnect
 				if err := l.connect(); err != nil {
 					slog.Error("Failed to reconnect", "exchange", l.name, "error", err)
 					continue
@@ -255,7 +240,6 @@ func (l *LiveExchangeAdapter) handleReconnection(ctx context.Context) {
 				l.isHealthy = true
 				slog.Info("Reconnected successfully", "exchange", l.name)
 
-				// Restart reading data
 				go l.readData(ctx)
 			}
 		}

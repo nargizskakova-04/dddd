@@ -1,5 +1,3 @@
-// Package exchanges provides implementations for connecting to cryptocurrency exchanges
-// and generating synthetic market data for testing purposes.
 package exchanges
 
 import (
@@ -8,13 +6,11 @@ import (
 	"cryptomarket/internal/core/port"
 )
 
-// Exchange types constants
 const (
 	ExchangeTypeLive = "live"
 	ExchangeTypeTest = "test"
 )
 
-// Default exchange names
 const (
 	Exchange1Name     = "exchange1"
 	Exchange2Name     = "exchange2"
@@ -24,7 +20,6 @@ const (
 	TestExchange3Name = "test-exchange3"
 )
 
-// Default connection settings
 const (
 	DefaultHost = "127.0.0.1"
 	LivePort1   = 40101
@@ -35,15 +30,13 @@ const (
 	TestPort3   = 50103
 )
 
-// ExchangeConfig holds configuration for creating exchange adapters
 type ExchangeConfig struct {
 	Name string
 	Host string
 	Port int
-	Type string // "live" or "test"
+	Type string
 }
 
-// CreateLiveExchangeAdapters creates all three live exchange adapters with default settings
 func CreateLiveExchangeAdapters() []port.ExchangeAdapter {
 	return []port.ExchangeAdapter{
 		NewLiveExchangeAdapter(DefaultHost, LivePort1, Exchange1Name),
@@ -52,7 +45,6 @@ func CreateLiveExchangeAdapters() []port.ExchangeAdapter {
 	}
 }
 
-// CreateTestExchangeAdapters creates all three test exchange adapters
 func CreateTestExchangeAdapters() []port.ExchangeAdapter {
 	return []port.ExchangeAdapter{
 		NewTestExchangeAdapter(DefaultHost, TestPort1, TestExchange1Name),
@@ -61,17 +53,14 @@ func CreateTestExchangeAdapters() []port.ExchangeAdapter {
 	}
 }
 
-// CreateLiveExchangeAdapter creates a single live exchange adapter
 func CreateLiveExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
 	return NewLiveExchangeAdapter(config.Host, config.Port, config.Name)
 }
 
-// CreateTestExchangeAdapter creates a single test exchange adapter
 func CreateTestExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
 	return NewTestExchangeAdapter(config.Host, config.Port, config.Name)
 }
 
-// CreateExchangeAdapter creates an exchange adapter based on type
 func CreateExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
 	switch config.Type {
 	case ExchangeTypeLive:
@@ -79,12 +68,11 @@ func CreateExchangeAdapter(config ExchangeConfig) port.ExchangeAdapter {
 	case ExchangeTypeTest:
 		return CreateTestExchangeAdapter(config)
 	default:
-		// Default to test adapter for safety
+
 		return CreateTestExchangeAdapter(config)
 	}
 }
 
-// CreateExchangeAdaptersFromConfigs creates adapters from a list of configurations
 func CreateExchangeAdaptersFromConfigs(configs []ExchangeConfig) []port.ExchangeAdapter {
 	adapters := make([]port.ExchangeAdapter, 0, len(configs))
 
@@ -96,7 +84,6 @@ func CreateExchangeAdaptersFromConfigs(configs []ExchangeConfig) []port.Exchange
 	return adapters
 }
 
-// GetDefaultLiveConfigs returns default configurations for live exchanges
 func GetDefaultLiveConfigs() []ExchangeConfig {
 	return []ExchangeConfig{
 		{
@@ -120,7 +107,6 @@ func GetDefaultLiveConfigs() []ExchangeConfig {
 	}
 }
 
-// GetDefaultTestConfigs returns default configurations for test exchanges
 func GetDefaultTestConfigs() []ExchangeConfig {
 	return []ExchangeConfig{
 		{
@@ -144,7 +130,6 @@ func GetDefaultTestConfigs() []ExchangeConfig {
 	}
 }
 
-// ValidateExchangeConfig validates an exchange configuration
 func ValidateExchangeConfig(config ExchangeConfig) error {
 	if config.Name == "" {
 		return fmt.Errorf("exchange name cannot be empty")
@@ -166,7 +151,6 @@ func ValidateExchangeConfig(config ExchangeConfig) error {
 	return nil
 }
 
-// SupportedSymbols returns the list of supported trading pairs
 func SupportedSymbols() []string {
 	return []string{
 		"BTCUSDT",
@@ -177,7 +161,6 @@ func SupportedSymbols() []string {
 	}
 }
 
-// IsSymbolSupported checks if a trading pair is supported
 func IsSymbolSupported(symbol string) bool {
 	supported := SupportedSymbols()
 	for _, s := range supported {

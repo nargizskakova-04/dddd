@@ -21,12 +21,11 @@ func NewPriceHandler(
 	}
 }
 
-// Response structures
 type LatestPriceResponse struct {
 	Symbol    string  `json:"symbol"`
 	Price     float64 `json:"price"`
 	Timestamp int64   `json:"timestamp"`
-	Exchange  string  `json:"exchange,omitempty"` // omitempty for cross-exchange responses
+	Exchange  string  `json:"exchange,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -34,7 +33,6 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-// Supported symbols
 var supportedSymbols = map[string]bool{
 	"BTCUSDT":  true,
 	"DOGEUSDT": true,
@@ -44,23 +42,20 @@ var supportedSymbols = map[string]bool{
 }
 
 func (h *PriceHandler) GetLatestPrice(w http.ResponseWriter, r *http.Request) {
-	// Extract symbol from URL path
+
 	symbol := r.PathValue("symbol")
 	if symbol == "" {
 		h.writeErrorResponse(w, http.StatusBadRequest, "missing symbol parameter")
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Call service to get latest price
 	marketData, err := h.priceService.GetLatestPrice(r.Context(), symbol)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get latest price: "+err.Error())
@@ -72,7 +67,6 @@ func (h *PriceHandler) GetLatestPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -84,7 +78,7 @@ func (h *PriceHandler) GetLatestPrice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PriceHandler) GetLatestPriceByExchange(w http.ResponseWriter, r *http.Request) {
-	// Extract exchange and symbol from URL path
+
 	exchange := r.PathValue("exchange")
 	symbol := r.PathValue("symbol")
 
@@ -98,16 +92,13 @@ func (h *PriceHandler) GetLatestPriceByExchange(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Call service to get latest price by exchange
 	marketData, err := h.priceService.GetLatestPriceByExchange(r.Context(), symbol, exchange)
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get latest price: "+err.Error())
@@ -119,7 +110,6 @@ func (h *PriceHandler) GetLatestPriceByExchange(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -131,37 +121,34 @@ func (h *PriceHandler) GetLatestPriceByExchange(w http.ResponseWriter, r *http.R
 }
 
 func (h *PriceHandler) GetHighestPrice(w http.ResponseWriter, r *http.Request) {
-	// Extract symbol from URL path
+
 	symbol := r.PathValue("symbol")
 	if symbol == "" {
 		h.writeErrorResponse(w, http.StatusBadRequest, "missing symbol parameter")
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Get period parameter from query string
 	period := r.URL.Query().Get("period")
 
 	var marketData *domain.MarketData
 	var err error
 
 	if period != "" {
-		// Use period-based method
+
 		marketData, err = h.priceService.GetHighestPriceWithPeriod(r.Context(), symbol, period)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price with period: "+err.Error())
 			return
 		}
 	} else {
-		// Use default method (last 30 records)
+
 		marketData, err = h.priceService.GetHighestPrice(r.Context(), symbol)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
@@ -178,7 +165,6 @@ func (h *PriceHandler) GetHighestPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -189,9 +175,8 @@ func (h *PriceHandler) GetHighestPrice(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// GetHighestPriceByExchange handles GET /prices/highest/{exchange}/{symbol}?period={duration}
 func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.Request) {
-	// Extract exchange and symbol from URL path
+
 	exchange := r.PathValue("exchange")
 	symbol := r.PathValue("symbol")
 
@@ -205,30 +190,27 @@ func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Get period parameter from query string
 	period := r.URL.Query().Get("period")
 
 	var marketData *domain.MarketData
 	var err error
 
 	if period != "" {
-		// Use period-based method
+
 		marketData, err = h.priceService.GetHighestPriceByExchangeWithPeriod(r.Context(), symbol, exchange, period)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price by exchange with period: "+err.Error())
 			return
 		}
 	} else {
-		// Use default method (last 30 records)
+
 		marketData, err = h.priceService.GetHighestPriceByExchange(r.Context(), symbol, exchange)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price by exchange: "+err.Error())
@@ -245,7 +227,6 @@ func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -256,7 +237,6 @@ func (h *PriceHandler) GetHighestPriceByExchange(w http.ResponseWriter, r *http.
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// NEW: GetPeriodInfo handles GET /prices/period-info?period={duration} for debugging
 func (h *PriceHandler) GetPeriodInfo(w http.ResponseWriter, r *http.Request) {
 	period := r.URL.Query().Get("period")
 	if period == "" {
@@ -264,7 +244,6 @@ func (h *PriceHandler) GetPeriodInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the service supports period info
 	if svc, ok := h.priceService.(interface {
 		GetPeriodInfo(string) (map[string]interface{}, error)
 	}); ok {
@@ -281,37 +260,34 @@ func (h *PriceHandler) GetPeriodInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PriceHandler) GetLowestPrice(w http.ResponseWriter, r *http.Request) {
-	// Extract symbol from URL path
+
 	symbol := r.PathValue("symbol")
 	if symbol == "" {
 		h.writeErrorResponse(w, http.StatusBadRequest, "missing symbol parameter")
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Get period parameter from query string
 	period := r.URL.Query().Get("period")
 
 	var marketData *domain.MarketData
 	var err error
 
 	if period != "" {
-		// Use period-based method
+
 		marketData, err = h.priceService.GetLowestPriceWithPeriod(r.Context(), symbol, period)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get lowhest price with period: "+err.Error())
 			return
 		}
 	} else {
-		// Use default method (last 30 records)
+
 		marketData, err = h.priceService.GetLowestPrice(r.Context(), symbol)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get highest price: "+err.Error())
@@ -328,7 +304,6 @@ func (h *PriceHandler) GetLowestPrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -340,7 +315,7 @@ func (h *PriceHandler) GetLowestPrice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PriceHandler) GetLowestPriceByExchange(w http.ResponseWriter, r *http.Request) {
-	// Extract exchange and symbol from URL path
+
 	exchange := r.PathValue("exchange")
 	symbol := r.PathValue("symbol")
 
@@ -354,30 +329,27 @@ func (h *PriceHandler) GetLowestPriceByExchange(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Get period parameter from query string
 	period := r.URL.Query().Get("period")
 
 	var marketData *domain.MarketData
 	var err error
 
 	if period != "" {
-		// Use period-based method
+
 		marketData, err = h.priceService.GetLowestPriceByExchangeWithPeriod(r.Context(), symbol, exchange, period)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get lowest price by exchange with period: "+err.Error())
 			return
 		}
 	} else {
-		// Use default method (last 30 records)
+
 		marketData, err = h.priceService.GetLowestPriceByExchange(r.Context(), symbol, exchange)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get lowest price by exchange: "+err.Error())
@@ -394,7 +366,6 @@ func (h *PriceHandler) GetLowestPriceByExchange(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -406,37 +377,32 @@ func (h *PriceHandler) GetLowestPriceByExchange(w http.ResponseWriter, r *http.R
 }
 
 func (h *PriceHandler) GetAveragePrice(w http.ResponseWriter, r *http.Request) {
-	// Extract symbol from URL path
+
 	symbol := r.PathValue("symbol")
 	if symbol == "" {
 		h.writeErrorResponse(w, http.StatusBadRequest, "missing symbol parameter")
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Get period parameter from query string
 	period := r.URL.Query().Get("period")
 
 	var marketData *domain.MarketData
 	var err error
 
 	if period != "" {
-		// Use period-based method
 		marketData, err = h.priceService.GetAveragePriceWithPeriod(r.Context(), symbol, period)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get average price with period: "+err.Error())
 			return
 		}
 	} else {
-		// Use default method (last 30 records)
 		marketData, err = h.priceService.GetAveragePrice(r.Context(), symbol)
 		if err != nil {
 			h.writeErrorResponse(w, http.StatusInternalServerError, "failed to get average price: "+err.Error())
@@ -453,7 +419,6 @@ func (h *PriceHandler) GetAveragePrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepare response
 	response := LatestPriceResponse{
 		Symbol:    marketData.Symbol,
 		Price:     marketData.Price,
@@ -465,7 +430,6 @@ func (h *PriceHandler) GetAveragePrice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PriceHandler) GetAveragePriceByExchange(w http.ResponseWriter, r *http.Request) {
-	// Extract exchange and symbol from URL path
 	exchange := r.PathValue("exchange")
 	symbol := r.PathValue("symbol")
 
@@ -479,16 +443,13 @@ func (h *PriceHandler) GetAveragePriceByExchange(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Normalize symbol to uppercase
 	symbol = strings.ToUpper(symbol)
 
-	// Validate symbol
 	if !supportedSymbols[symbol] {
 		h.writeErrorResponse(w, http.StatusBadRequest, "unsupported symbol: "+symbol)
 		return
 	}
 
-	// Get period parameter from query string
 	period := r.URL.Query().Get("period")
 
 	var marketData *domain.MarketData

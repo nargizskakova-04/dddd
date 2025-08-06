@@ -14,17 +14,15 @@ func (r *PricesRepository) GetAveragePriceFromLatestRecords(ctx context.Context,
 		return nil, fmt.Errorf("no allowed exchanges provided")
 	}
 
-	// Create placeholders for the IN clause
 	placeholders := make([]string, len(allowedExchanges))
 	args := make([]interface{}, len(allowedExchanges)+1)
-	args[0] = symbol // First argument is the symbol
+	args[0] = symbol
 
 	for i, exchange := range allowedExchanges {
-		placeholders[i] = fmt.Sprintf("$%d", i+2) // Start from $2 since $1 is symbol
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
 		args[i+1] = exchange
 	}
 
-	// FIXED: Get latest record from each allowed exchange and calculate average
 	query := fmt.Sprintf(`
 		WITH latest_records AS (
 			SELECT DISTINCT ON (exchange) 
@@ -55,21 +53,18 @@ func (r *PricesRepository) GetAveragePriceFromLatestRecords(ctx context.Context,
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get average price from latest records: %w", err)
 	}
 
-	// FIXED: Use the calculated average price
 	marketData.Price = avgPrice
 	marketData.Timestamp = timestamp.Unix()
 
 	return &marketData, nil
 }
 
-// FIXED: GetAveragePriceByExchangeFromLatestRecord - simplified to just return the average_price from latest record
 func (r *PricesRepository) GetAveragePriceByExchangeFromLatestRecord(ctx context.Context, symbol, exchange string) (*domain.MarketData, error) {
-	// FIXED: Simply get the average_price from the latest record for this exchange
 	query := `
 		SELECT pair_name, exchange, timestamp, average_price
 		FROM prices
@@ -90,12 +85,11 @@ func (r *PricesRepository) GetAveragePriceByExchangeFromLatestRecord(ctx context
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get average price by exchange from latest record: %w", err)
 	}
 
-	// FIXED: Consistency - use Unix seconds
 	marketData.Timestamp = timestamp.Unix()
 	return &marketData, nil
 }

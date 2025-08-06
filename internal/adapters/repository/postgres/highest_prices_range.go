@@ -1,4 +1,3 @@
-// internal/adapters/repository/postgres/highest_prices_range.go
 package postgres
 
 import (
@@ -11,7 +10,6 @@ import (
 	"cryptomarket/internal/core/domain"
 )
 
-// GetHighestPriceInRange finds the highest max_price across all allowed exchanges within a time range
 func (r *PricesRepository) GetHighestPriceInRange(ctx context.Context, symbol string, allowedExchanges []string, from, to time.Time) (*domain.MarketData, error) {
 	if len(allowedExchanges) == 0 {
 		return nil, fmt.Errorf("no allowed exchanges provided")
@@ -24,7 +22,6 @@ func (r *PricesRepository) GetHighestPriceInRange(ctx context.Context, symbol st
 		"to", to.Format(time.RFC3339),
 		"duration", to.Sub(from))
 
-	// Create placeholders for the IN clause
 	placeholders := make([]string, len(allowedExchanges))
 	args := make([]interface{}, len(allowedExchanges)+3)
 	args[0] = symbol
@@ -32,7 +29,7 @@ func (r *PricesRepository) GetHighestPriceInRange(ctx context.Context, symbol st
 	args[2] = to
 
 	for i, exchange := range allowedExchanges {
-		placeholders[i] = fmt.Sprintf("$%d", i+4) // Start from $4 since $1=symbol, $2=from, $3=to
+		placeholders[i] = fmt.Sprintf("$%d", i+4)
 		args[i+3] = exchange
 	}
 
@@ -71,12 +68,11 @@ func (r *PricesRepository) GetHighestPriceInRange(ctx context.Context, symbol st
 				"symbol", symbol,
 				"exchanges", allowedExchanges,
 				"time_range", fmt.Sprintf("%s to %s", from.Format(time.RFC3339), to.Format(time.RFC3339)))
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get highest price in range: %w", err)
 	}
 
-	// Convert timestamp to Unix seconds for consistency
 	marketData.Timestamp = timestamp.Unix()
 
 	slog.Info("Found highest price in database",
@@ -89,7 +85,6 @@ func (r *PricesRepository) GetHighestPriceInRange(ctx context.Context, symbol st
 	return &marketData, nil
 }
 
-// GetHighestPriceInRangeByExchange finds the highest max_price from specific exchange within a time range
 func (r *PricesRepository) GetHighestPriceInRangeByExchange(ctx context.Context, symbol, exchange string, from, to time.Time) (*domain.MarketData, error) {
 	slog.Debug("Getting highest price in range by exchange from database",
 		"symbol", symbol,
@@ -133,12 +128,11 @@ func (r *PricesRepository) GetHighestPriceInRangeByExchange(ctx context.Context,
 				"symbol", symbol,
 				"exchange", exchange,
 				"time_range", fmt.Sprintf("%s to %s", from.Format(time.RFC3339), to.Format(time.RFC3339)))
-			return nil, nil // No data found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get highest price in range by exchange: %w", err)
 	}
 
-	// Convert timestamp to Unix seconds for consistency
 	marketData.Timestamp = timestamp.Unix()
 
 	slog.Info("Found highest price in database for exchange",
@@ -151,7 +145,6 @@ func (r *PricesRepository) GetHighestPriceInRangeByExchange(ctx context.Context,
 	return &marketData, nil
 }
 
-// GetPriceDataStats returns statistics about available price data for debugging
 func (r *PricesRepository) GetPriceDataStats(ctx context.Context, symbol string, exchanges []string) (map[string]interface{}, error) {
 	if len(exchanges) == 0 {
 		return nil, fmt.Errorf("no exchanges provided")
@@ -159,7 +152,6 @@ func (r *PricesRepository) GetPriceDataStats(ctx context.Context, symbol string,
 
 	stats := make(map[string]interface{})
 
-	// Create placeholders for the IN clause
 	placeholders := make([]string, len(exchanges))
 	args := make([]interface{}, len(exchanges)+1)
 	args[0] = symbol
@@ -169,7 +161,6 @@ func (r *PricesRepository) GetPriceDataStats(ctx context.Context, symbol string,
 		args[i+1] = exchange
 	}
 
-	// Get overall statistics
 	query := fmt.Sprintf(`
 		SELECT 
 			COUNT(*) as total_records,
@@ -219,7 +210,6 @@ func (r *PricesRepository) GetPriceDataStats(ctx context.Context, symbol string,
 		stats["average_price"] = avgPrice.Float64
 	}
 
-	// Get per-exchange statistics
 	exchangeStats := make(map[string]interface{})
 	for _, exchange := range exchanges {
 		exchangeQuery := `

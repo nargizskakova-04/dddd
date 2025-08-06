@@ -1,4 +1,3 @@
-// internal/adapters/repository/postgres/health.go
 package postgres
 
 import (
@@ -24,12 +23,10 @@ func (h *HealthRepository) CheckDatabaseHealth(ctx context.Context) error {
 		return fmt.Errorf("database connection is nil")
 	}
 
-	// Ping the database
 	if err := h.db.PingContext(ctx); err != nil {
 		return fmt.Errorf("database ping failed: %w", err)
 	}
 
-	// Try a simple query
 	query := `SELECT 1`
 	var result int
 	if err := h.db.QueryRowContext(ctx, query).Scan(&result); err != nil {
