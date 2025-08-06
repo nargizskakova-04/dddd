@@ -159,10 +159,8 @@ func (l *LiveExchangeAdapter) parseMarketData(line string) (*domain.MarketData, 
 	}
 
 	// If not JSON, try to parse as simple format
-	// Expected format: "SYMBOL:PRICE" or "SYMBOL PRICE"
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
-		// Try colon separator
 		parts = strings.Split(line, ":")
 		if len(parts) < 2 {
 			return nil, fmt.Errorf("invalid line format: %s", line)
@@ -180,7 +178,7 @@ func (l *LiveExchangeAdapter) parseMarketData(line string) (*domain.MarketData, 
 	return &domain.MarketData{
 		Symbol:    symbol,
 		Price:     price,
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now().UnixMilli(), // ENSURE: Always milliseconds
 		Exchange:  l.name,
 	}, nil
 }
@@ -214,16 +212,16 @@ func (l *LiveExchangeAdapter) parseJSONMarketData(data map[string]interface{}) (
 
 	// Parse timestamp
 	if timestamp, ok := data["timestamp"].(float64); ok {
-		marketData.Timestamp = int64(timestamp)
+		marketData.Timestamp = int64(timestamp) // Assume it's already in milliseconds
 	} else if timestampStr, ok := data["timestamp"].(string); ok {
 		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse timestamp: %w", err)
 		}
-		marketData.Timestamp = timestamp
+		marketData.Timestamp = timestamp // Assume it's already in milliseconds
 	} else {
 		// Use current time if no timestamp provided
-		marketData.Timestamp = time.Now().Unix()
+		marketData.Timestamp = time.Now().UnixMilli() // ENSURE: Always milliseconds
 	}
 
 	return marketData, nil
